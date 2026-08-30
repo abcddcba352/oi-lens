@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, History, LogOut, PlugZap, RefreshCw, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, History, LogOut, PlugZap, RefreshCw, Search, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -9,9 +9,15 @@ import { Input } from '@/components/ui/input';
 import type { LevelSignal, MarketAnalysis } from '@/lib/market-types';
 
 const instruments = [
-  ['NSE:NIFTY50-INDEX', 'NIFTY · Nifty 50'],
-  ['NSE:NIFTYBANK-INDEX', 'BANKNIFTY · Nifty Bank'],
-  ['NSE:RELIANCE-EQ', 'RELIANCE · Reliance Industries'],
+  ['NSE:NIFTY50-INDEX', 'NIFTY 50'],
+  ['NSE:NIFTYBANK-INDEX', 'NIFTY BANK'],
+  ['NSE:RELIANCE-EQ', 'RELIANCE'],
+  ['NSE:HDFCBANK-EQ', 'HDFCBANK'],
+  ['NSE:ICICIBANK-EQ', 'ICICIBANK'],
+  ['NSE:SBIN-EQ', 'SBIN'],
+  ['NSE:TCS-EQ', 'TCS'],
+  ['NSE:INFY-EQ', 'INFY'],
+  ['NSE:ITC-EQ', 'ITC'],
 ] as const;
 
 interface DataStatus {
@@ -61,9 +67,15 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   }, [initialSource, initialSymbol]);
 
   async function load(nextSymbol = symbol) {
+    const normalized = normalizeSymbol(nextSymbol);
+    if (!normalized) {
+      setError('Enter a stock symbol such as TCS or a FYERS symbol such as NSE:TCS-EQ.');
+      return;
+    }
+    setSymbol(normalized);
     setLoading(true); setError(null);
     try {
-      const response = await fetch(`/api/market/chain?symbol=${encodeURIComponent(nextSymbol)}`, { cache: 'no-store' });
+      const response = await fetch(`/api/market/chain?symbol=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
       const payload = await response.json() as { analysis?: MarketAnalysis; dataStatus?: DataStatus; error?: string };
       if (!response.ok || !payload.analysis) throw new Error(payload.error ?? 'Unable to load option-chain data.');
       setAnalysis(payload.analysis);
@@ -124,9 +136,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
 
       <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         {error && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error}</div>}
-        <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 md:grid-cols-[1fr_auto_auto] md:items-end sm:p-5">
+        <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">
           <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Six-month verified levels</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Support and resistance from options positioning</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Live OI, OI change and option volume are combined with 183 calendar days of FYERS daily price behaviour. History is cached once and only recent sessions are refreshed.</p></div>
-          <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Instrument<select value={symbol} onChange={(event) => { const value = event.target.value; setSymbol(value); void load(value); }} className="h-10 min-w-56 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground">{instruments.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <form className="grid gap-1.5" onSubmit={(event) => { event.preventDefault(); void load(); }}><label htmlFor="instrument-symbol" className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Any index or F&amp;O stock</label><div className="flex gap-2"><Input id="instrument-symbol" list="fyers-instruments" value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} className="h-10 min-w-0 font-mono text-sm font-bold uppercase" placeholder="TCS or NSE:TCS-EQ" autoComplete="off" aria-describedby="instrument-help" /><Button type="submit" size="lg" disabled={loading}><Search data-icon="inline-start" />Analyze</Button></div><datalist id="fyers-instruments">{instruments.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</datalist><span id="instrument-help" className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Type a ticker like TCS, SBIN, M&amp;M, or the full FYERS symbol.</span></form>
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Expiry<select className="h-10 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground" aria-label="Expiry"><option>{snapshot.expiry}</option></select></label>
         </section>
 
@@ -174,4 +186,17 @@ function historyStatus(value: DataStatus['historySource']) {
   if (value === 'backfilled') return 'Six months cached';
   if (value === 'incremental') return 'Recent sessions refreshed';
   return 'History cache current';
+}
+function normalizeSymbol(value: string) {
+  const input = value.trim().toUpperCase();
+  const aliases: Record<string, string> = {
+    NIFTY: 'NSE:NIFTY50-INDEX',
+    NIFTY50: 'NSE:NIFTY50-INDEX',
+    BANKNIFTY: 'NSE:NIFTYBANK-INDEX',
+    NIFTYBANK: 'NSE:NIFTYBANK-INDEX',
+  };
+  if (aliases[input]) return aliases[input];
+  if (/^(NSE|BSE):[A-Z0-9&._-]+-(EQ|INDEX)$/.test(input)) return input;
+  if (/^[A-Z0-9&._-]+$/.test(input)) return `NSE:${input}-EQ`;
+  return '';
 }
