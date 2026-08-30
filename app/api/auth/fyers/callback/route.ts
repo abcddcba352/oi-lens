@@ -1,5 +1,5 @@
 import {
-  clearFyersCookies,
+  clearFyersSessionCookies,
   exchangeFyersAuthCode,
   fyersRedirectUri,
   readFyersState,
@@ -14,15 +14,15 @@ export async function GET(request: Request) {
   const expectedState = readFyersState(request);
   if (!code || !state || !expectedState || state !== expectedState) {
     returnUrl.searchParams.set('fyers', 'failed');
-    return redirectWithCookies(returnUrl, clearFyersCookies(request));
+    return redirectWithCookies(returnUrl, clearFyersSessionCookies(request));
   }
   try {
-    const sealed = await exchangeFyersAuthCode(code);
+    const sealed = await exchangeFyersAuthCode(request, code);
     returnUrl.searchParams.set('fyers', 'connected');
-    return redirectWithCookies(returnUrl, [sessionCookie(request, sealed), ...clearFyersCookies(request).slice(0, 1)]);
+    return redirectWithCookies(returnUrl, [sessionCookie(request, sealed), ...clearFyersSessionCookies(request).slice(0, 1)]);
   } catch {
     returnUrl.searchParams.set('fyers', 'failed');
-    return redirectWithCookies(returnUrl, clearFyersCookies(request));
+    return redirectWithCookies(returnUrl, clearFyersSessionCookies(request));
   }
 }
 

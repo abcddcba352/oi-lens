@@ -1,10 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, Database, History, LogOut, PlugZap, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Database, History, LogOut, PlugZap, RefreshCw, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import type { LevelSignal, MarketAnalysis } from '@/lib/market-types';
 
 const instruments = [
@@ -20,6 +21,10 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [fyers, setFyers] = useState({ configured: false, connected: initial.snapshot.source === 'fyers', checked: false });
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [appId, setAppId] = useState('');
+  const [secretId, setSecretId] = useState('');
+  const [setupSaving, setSetupSaving] = useState(false);
   const initialSource = initial.snapshot.source;
   const initialSymbol = initial.snapshot.symbol;
 
@@ -61,6 +66,33 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     window.location.reload();
   }
 
+  async function saveFyersSetup(event: React.SyntheticEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSetupSaving(true); setError(null);
+    try {
+      const response = await fetch('/api/auth/fyers/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appId, secretId }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? 'Unable to save FYERS setup.');
+      setFyers({ configured: true, connected: false, checked: true });
+      setSecretId('');
+      window.location.assign('/api/auth/fyers/login');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Unable to save FYERS setup.');
+      setSetupSaving(false);
+    }
+  }
+
+  async function forgetFyersSetup() {
+    await fetch('/api/auth/fyers/setup', { method: 'DELETE' });
+    setFyers({ configured: false, connected: false, checked: true });
+    setAppId(''); setSecretId(''); setSetupOpen(false);
+    window.location.reload();
+  }
+
   const { snapshot, diagnostics, primarySupport, primaryResistance } = analysis;
   const modeLabel = snapshot.source === 'fyers' ? 'FYERS live chain' : 'Demo data · FYERS ready';
   const dateFormatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
@@ -71,9 +103,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       <header className="border-b border-border/70 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-primary font-mono text-sm font-black text-primary-foreground shadow-[0_0_28px_color-mix(in_oklch,var(--primary),transparent_70%)]">OI</span><div><p className="font-heading text-lg font-bold tracking-tight">OI Lens</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Derivative structure lab</p></div></div>
-          <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline" className={snapshot.source === 'fyers' ? 'h-7 border-emerald-300/25 bg-emerald-300/10 px-3 text-emerald-200' : 'h-7 border-amber-300/25 bg-amber-300/10 px-3 text-amber-200'}>{modeLabel}</Badge>{fyers.checked && (fyers.connected ? <Button variant="outline" size="lg" className="border-border/80 bg-card" onClick={() => void disconnectFyers()}><LogOut data-icon="inline-start" />Disconnect FYERS</Button> : <Button variant="outline" size="lg" className="border-primary/40 bg-primary/10 text-primary" disabled={!fyers.configured} title={fyers.configured ? 'Open secure FYERS login' : 'Add FYERS App ID and Secret ID to enable login'} onClick={() => window.location.assign('/api/auth/fyers/login')}><PlugZap data-icon="inline-start" />{fyers.configured ? 'Connect FYERS' : 'FYERS setup needed'}</Button>)}<Button variant="outline" size="lg" className="border-border/80 bg-card" disabled={loading} onClick={() => load()}><RefreshCw className={loading ? 'animate-spin' : ''} data-icon="inline-start" />Refresh</Button></div>
+          <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline" className={snapshot.source === 'fyers' ? 'h-7 border-emerald-300/25 bg-emerald-300/10 px-3 text-emerald-200' : 'h-7 border-amber-300/25 bg-amber-300/10 px-3 text-amber-200'}>{modeLabel}</Badge>{fyers.checked && (fyers.connected ? <Button variant="outline" size="lg" className="border-border/80 bg-card" onClick={() => void disconnectFyers()}><LogOut data-icon="inline-start" />Disconnect FYERS</Button> : <Button variant="outline" size="lg" className="border-primary/40 bg-primary/10 text-primary" onClick={() => fyers.configured ? window.location.assign('/api/auth/fyers/login') : setSetupOpen(true)}><PlugZap data-icon="inline-start" />{fyers.configured ? 'Connect FYERS' : 'Setup FYERS'}</Button>)}<Button variant="outline" size="icon-lg" className="border-border/80 bg-card" aria-label="FYERS settings" title="FYERS settings" onClick={() => setSetupOpen(true)}><Settings /></Button><Button variant="outline" size="lg" className="border-border/80 bg-card" disabled={loading} onClick={() => load()}><RefreshCw className={loading ? 'animate-spin' : ''} data-icon="inline-start" />Refresh</Button></div>
         </div>
       </header>
+
+      {setupOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSetupOpen(false); }}><dialog open aria-labelledby="fyers-setup-title" className="relative m-0 w-full max-w-md rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.14em] text-primary">Broker connection</p><h2 id="fyers-setup-title" className="font-heading mt-2 text-2xl font-bold">FYERS setup</h2></div><Button variant="ghost" size="icon" aria-label="Close setup" onClick={() => setSetupOpen(false)}><X /></Button></div><p className="mt-3 text-sm leading-6 text-muted-foreground">Enter the App ID and Secret ID from your FYERS API app. They are encrypted into a protected cookie for this browser only and are never written to the site source or database.</p><div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Redirect URL in FYERS:</strong><br /><span className="break-all font-mono text-[11px]">https://oi-lens-six-month.purushothamkodidala3.chatgpt.site/api/auth/fyers/callback</span></div><form className="mt-5 grid gap-4" onSubmit={saveFyersSetup}><label htmlFor="fyers-app-id" className="grid gap-1.5 text-xs font-bold">App ID</label><Input id="fyers-app-id" className="h-10 font-mono" value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" required /><label htmlFor="fyers-secret-id" className="grid gap-1.5 text-xs font-bold">Secret ID</label><Input id="fyers-secret-id" className="h-10 font-mono" type="password" value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="new-password" required /><Button type="submit" size="lg" disabled={setupSaving}>{setupSaving ? <RefreshCw className="animate-spin" data-icon="inline-start" /> : <PlugZap data-icon="inline-start" />}{setupSaving ? 'Connecting…' : 'Save and login with FYERS'}</Button>{fyers.configured && <Button type="button" variant="ghost" className="text-muted-foreground" onClick={() => void forgetFyersSetup()}>Forget saved FYERS setup</Button>}</form></dialog></div>}
 
       <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         {(error || warning) && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error ?? warning}</div>}

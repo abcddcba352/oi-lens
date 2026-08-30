@@ -1,7 +1,14 @@
 const STATE_COOKIE = 'oi_fyers_state';
 const SESSION_COOKIE = 'oi_fyers_session';
+const CREDENTIALS_COOKIE = 'oi_fyers_credentials';
 const FIFTEEN_MINUTES = 15 * 60;
 const ONE_DAY = 24 * 60 * 60;
+const THIRTY_DAYS = 30 * ONE_DAY;
+
+interface FyersCredentials {
+  appId: string;
+  secretId: string;
+}
 
 interface FyersTokenResponse {
   s?: string;
@@ -17,20 +24,30 @@ interface FyersSession {
   connectedAt: string;
 }
 
-function appId() {
-  return process.env.FYERS_APP_ID?.trim() ?? '';
-}
-
-function secretId() {
-  return process.env.FYERS_SECRET_ID?.trim() ?? '';
+function environmentCredentials(): FyersCredentials | null {
+  const appId = process.env.FYERS_APP_ID?.trim();
+  const secretId = process.env.FYERS_SECRET_ID?.trim();
+  return appId && secretId ? { appId, secretId } : null;
 }
 
 function apiBase() {
   return process.env.FYERS_API_BASE?.trim() || 'https://api-t1.fyers.in';
 }
 
-export function fyersIsConfigured() {
-  return Boolean(appId() && secretId());
+export async function readFyersCredentials(request: Request): Promise<FyersCredentials | null> {
+  const environment = environmentCredentials();
+  if (environment) return environment;
+  const sealed = readCookie(request, CREDENTIALS_COOKIE);
+  if (!sealed) return null;
+  try {
+    return await openValue<FyersCredentials>(sealed, await credentialKey(request));
+  } catch {
+    return null;
+  }
+}
+
+export async function fyersIsConfigured(request: Request) {
+  return Boolean(await readFyersCredentials(request));
 }
 
 export function fyersRedirectUri(request: Request) {
@@ -40,19 +57,22 @@ export function fyersRedirectUri(request: Request) {
   return new URL('/api/auth/fyers/callback', siteUrl || request.url).toString();
 }
 
-export function createFyersLogin(request: Request) {
-  if (!fyersIsConfigured()) throw new Error('FYERS App ID and Secret ID are not configured yet.');
+export async function createFyersLogin(request: Request) {
+  const credentials = await readFyersCredentials(request);
+  if (!credentials) throw new Error('Enter your FYERS App ID and Secret ID in Setup first.');
   const state = randomBase64Url(24);
   const url = new URL('/api/v3/generate-authcode', apiBase());
-  url.searchParams.set('client_id', appId());
+  url.searchParams.set('client_id', credentials.appId);
   url.searchParams.set('redirect_uri', fyersRedirectUri(request));
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('state', state);
   return { url, state };
 }
 
-export async function exchangeFyersAuthCode(code: string) {
-  const appIdHash = await sha256Hex(`${appId()}${secretId()}`);
+export async function exchangeFyersAuthCode(request: Request, code: string) {
+  const credentials = await readFyersCredentials(request);
+  if (!credentials) throw new Error('FYERS credentials are missing.');
+  const appIdHash = await sha256Hex(`${credentials.appId}${credentials.secretId}`);
   const response = await fetch(new URL('/api/v3/validate-authcode', apiBase()), {
     method: 'POST',
     headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -62,19 +82,19 @@ export async function exchangeFyersAuthCode(code: string) {
   if (!response.ok || payload.s === 'error' || !payload.access_token) {
     throw new Error(payload.message ?? `FYERS token exchange failed (${response.status}).`);
   }
-  return sealSession({
-    accessToken: payload.access_token,
-    refreshToken: payload.refresh_token,
-    connectedAt: new Date().toISOString(),
-  });
+  return sealValue(
+    { accessToken: payload.access_token, refreshToken: payload.refresh_token, connectedAt: new Date().toISOString() },
+    await sessionKey(credentials.secretId),
+  );
 }
 
 export async function readFyersAuthorization(request: Request) {
   const sealed = readCookie(request, SESSION_COOKIE);
-  if (!sealed || !fyersIsConfigured()) return null;
+  const credentials = await readFyersCredentials(request);
+  if (!sealed || !credentials) return null;
   try {
-    const session = await openSession(sealed);
-    return `${appId()}:${session.accessToken}`;
+    const session = await openValue<FyersSession>(sealed, await sessionKey(credentials.secretId));
+    return `${credentials.appId}:${session.accessToken}`;
   } catch {
     return null;
   }
@@ -84,23 +104,29 @@ export async function hasFyersSession(request: Request) {
   return Boolean(await readFyersAuthorization(request));
 }
 
+export async function credentialsCookie(request: Request, credentials: FyersCredentials) {
+  const sealed = await sealValue(credentials, await credentialKey(request));
+  return serializeCookie(CREDENTIALS_COOKIE, sealed, request, THIRTY_DAYS);
+}
+
 export function readFyersState(request: Request) {
   return readCookie(request, STATE_COOKIE);
 }
 
 export function stateCookie(request: Request, state: string) {
-  return serializeCookie(STATE_COOKIE, state, request, FIFTEEN_MINUTES, true);
+  return serializeCookie(STATE_COOKIE, state, request, FIFTEEN_MINUTES);
 }
 
 export function sessionCookie(request: Request, sealed: string) {
-  return serializeCookie(SESSION_COOKIE, sealed, request, ONE_DAY, true);
+  return serializeCookie(SESSION_COOKIE, sealed, request, ONE_DAY);
 }
 
-export function clearFyersCookies(request: Request) {
-  return [
-    serializeCookie(STATE_COOKIE, '', request, 0, true),
-    serializeCookie(SESSION_COOKIE, '', request, 0, true),
-  ];
+export function clearFyersSessionCookies(request: Request) {
+  return [clearCookie(STATE_COOKIE, request), clearCookie(SESSION_COOKIE, request)];
+}
+
+export function clearAllFyersCookies(request: Request) {
+  return [...clearFyersSessionCookies(request), clearCookie(CREDENTIALS_COOKIE, request)];
 }
 
 function readCookie(request: Request, name: string) {
@@ -112,15 +138,18 @@ function readCookie(request: Request, name: string) {
   return null;
 }
 
-function serializeCookie(name: string, value: string, request: Request, maxAge: number, httpOnly: boolean) {
+function serializeCookie(name: string, value: string, request: Request, maxAge: number) {
   const secure = new URL(request.url).protocol === 'https:' || process.env.NODE_ENV === 'production';
-  return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? '; Secure' : ''}${httpOnly ? '; HttpOnly' : ''}`;
+  return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? '; Secure' : ''}; HttpOnly`;
 }
 
-async function sealSession(session: FyersSession) {
+function clearCookie(name: string, request: Request) {
+  return serializeCookie(name, '', request, 0);
+}
+
+async function sealValue(value: unknown, key: CryptoKey) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await sessionKey();
-  const plaintext = new TextEncoder().encode(JSON.stringify(session));
+  const plaintext = new TextEncoder().encode(JSON.stringify(value));
   const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext));
   const combined = new Uint8Array(iv.length + encrypted.length);
   combined.set(iv);
@@ -128,17 +157,25 @@ async function sealSession(session: FyersSession) {
   return toBase64Url(combined);
 }
 
-async function openSession(value: string): Promise<FyersSession> {
+async function openValue<T>(value: string, key: CryptoKey): Promise<T> {
   const combined = fromBase64Url(value);
   const iv = combined.slice(0, 12);
   const encrypted = combined.slice(12);
-  const key = await sessionKey();
   const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, encrypted);
-  return JSON.parse(new TextDecoder().decode(plaintext)) as FyersSession;
+  return JSON.parse(new TextDecoder().decode(plaintext)) as T;
 }
 
-async function sessionKey() {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${secretId()}:oi-lens-session`));
+async function credentialKey(request: Request) {
+  const userId = request.headers.get('oai-authenticated-user-id') || 'oi-lens-local-user';
+  return aesKey(`${userId}:oi-lens-fyers-credentials`);
+}
+
+async function sessionKey(secretId: string) {
+  return aesKey(`${secretId}:oi-lens-session`);
+}
+
+async function aesKey(material: string) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(material));
   return crypto.subtle.importKey('raw', digest, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
