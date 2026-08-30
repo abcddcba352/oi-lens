@@ -57,7 +57,7 @@ export interface HistoricalLevelObservation {
 }
 
 export interface ModelDiagnostics {
-  mode: 'calibrated' | 'provisional';
+  mode: 'calibrated' | 'historical' | 'provisional';
   lookbackStart: string;
   lookbackEnd: string;
   samples: number;
@@ -94,7 +94,9 @@ export interface MarketAnalysis {
 
 export interface PriceSession {
   date: string;
+  open?: number;
   high: number;
   low: number;
   close: number;
+  volume?: number;
 }

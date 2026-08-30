@@ -1,4 +1,4 @@
-import type { MarketSnapshot } from '../market-types';
+import type { MarketSnapshot, PriceSession } from '../market-types';
 
 export interface ChainRequest {
   symbol: string;
@@ -10,4 +10,5 @@ export interface MarketDataProvider {
   readonly id: 'fyers' | 'demo';
   isConfigured(): boolean;
   fetchOptionChain(request: ChainRequest): Promise<MarketSnapshot>;
+  fetchSixMonthHistory(symbol: string, asOf: string): Promise<PriceSession[]>;
 }

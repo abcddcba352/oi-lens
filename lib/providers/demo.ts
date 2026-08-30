@@ -1,4 +1,4 @@
-import { getDemoSnapshot } from '../demo-data';
+import { getDemoPriceHistory, getDemoSnapshot } from '../demo-data';
 import type { ChainRequest, MarketDataProvider } from './types';
 
 export class DemoProvider implements MarketDataProvider {
@@ -10,5 +10,9 @@ export class DemoProvider implements MarketDataProvider {
 
   async fetchOptionChain(request: ChainRequest) {
     return getDemoSnapshot(request.symbol);
+  }
+
+  async fetchSixMonthHistory(symbol: string, asOf: string) {
+    return getDemoPriceHistory(symbol, asOf);
   }
 }

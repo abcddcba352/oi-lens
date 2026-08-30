@@ -1,4 +1,4 @@
-import type { ChainStrike, MarketSnapshot } from '../market-types';
+import type { ChainStrike, MarketSnapshot, PriceSession } from '../market-types';
 import type { ChainRequest, MarketDataProvider } from './types';
 
 interface FyersOptionRow {
@@ -20,6 +20,13 @@ interface FyersChainResponse {
     expiryData?: Array<{ date?: string; expiry?: number }>;
     optionsChain?: FyersOptionRow[];
   };
+}
+
+interface FyersHistoryResponse {
+  s?: string;
+  code?: number;
+  message?: string;
+  candles?: number[][];
 }
 
 const names: Record<string, { displayName: string; instrumentType: 'index' | 'stock'; step: number; atr: number }> = {
@@ -121,5 +128,42 @@ export class FyersProvider implements MarketDataProvider {
       source: 'fyers',
       chain,
     };
+  }
+
+  async fetchSixMonthHistory(symbol: string, asOf: string): Promise<PriceSession[]> {
+    if (!this.token) throw new Error('Connect FYERS to load six-month history.');
+    const end = new Date(asOf);
+    const start = new Date(end.getTime() - 183 * 86_400_000);
+    const url = new URL('/data/history', this.baseUrl);
+    url.searchParams.set('symbol', symbol);
+    url.searchParams.set('resolution', 'D');
+    url.searchParams.set('date_format', '1');
+    url.searchParams.set('range_from', start.toISOString().slice(0, 10));
+    url.searchParams.set('range_to', end.toISOString().slice(0, 10));
+    url.searchParams.set('cont_flag', '0');
+    const response = await fetch(url, {
+      headers: { Authorization: this.token, Accept: 'application/json', 'User-Agent': 'OI-Lens/1.0 FYERS-API-Client' },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = await response.text();
+    let payload: FyersHistoryResponse;
+    try {
+      payload = JSON.parse(body) as FyersHistoryResponse;
+    } catch {
+      throw new Error(`FYERS returned an unexpected response for six-month history (${response.status}).`);
+    }
+    if (!response.ok || payload.s === 'error' || !payload.candles) {
+      throw new Error(payload.message ?? `FYERS history request failed (${response.status}).`);
+    }
+    const sessions = payload.candles
+      .filter((row) => row.length >= 6 && row.slice(0, 6).every(Number.isFinite))
+      .map((row) => ({
+        date: new Date(row[0] * 1000).toISOString().slice(0, 10),
+        open: row[1], high: row[2], low: row[3], close: row[4], volume: row[5],
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (sessions.length < 20) throw new Error('FYERS returned too few daily sessions for six-month analysis.');
+    return sessions;
   }
 }

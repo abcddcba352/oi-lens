@@ -1,4 +1,4 @@
-import type { HistoricalLevelObservation, LevelFeatures, MarketSnapshot } from './market-types.ts';
+import type { HistoricalLevelObservation, LevelFeatures, MarketSnapshot, PriceSession } from './market-types.ts';
 
 const snapshots: Record<string, MarketSnapshot> = {
   'NSE:NIFTY50-INDEX': makeSnapshot('NSE:NIFTY50-INDEX', 'NIFTY 50', 'index', 24_964.25, 50, 168),
@@ -63,6 +63,30 @@ function demoFeatures(index: number): LevelFeatures {
 
 export function getDemoSnapshot(symbol = 'NSE:NIFTY50-INDEX') {
   return structuredClone(snapshots[symbol] ?? snapshots['NSE:NIFTY50-INDEX']);
+}
+
+export function getDemoPriceHistory(symbol: string, asOf: string): PriceSession[] {
+  const snapshot = getDemoSnapshot(symbol);
+  const end = new Date(asOf);
+  const result: PriceSession[] = [];
+  for (let offset = 182; offset >= 1; offset -= 1) {
+    const date = new Date(end.getTime() - offset * 86_400_000);
+    if (date.getUTCDay() === 0 || date.getUTCDay() === 6) continue;
+    const index = result.length;
+    const center = snapshot.spot + Math.sin(index * 0.19) * snapshot.atr14 * 1.45 + Math.sin(index * 0.047) * snapshot.atr14 * 1.8;
+    const open = center - Math.sin(index * 0.31) * snapshot.atr14 * 0.18;
+    const close = center + Math.cos(index * 0.23) * snapshot.atr14 * 0.22;
+    const spread = snapshot.atr14 * (0.42 + ((index * 7) % 9) / 25);
+    result.push({
+      date: date.toISOString().slice(0, 10),
+      open,
+      high: Math.max(open, close) + spread,
+      low: Math.min(open, close) - spread,
+      close,
+      volume: 1_000_000 + ((index * 7919) % 2_400_000),
+    });
+  }
+  return result;
 }
 
 export function getDemoObservations(symbol: string, asOf: string): HistoricalLevelObservation[] {

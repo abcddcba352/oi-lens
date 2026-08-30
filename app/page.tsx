@@ -1,9 +1,9 @@
 import { OiDashboard } from '@/app/OiDashboard';
-import { getDemoObservations, getDemoPersistence, getDemoSnapshot } from '@/lib/demo-data';
-import { analyzeSnapshot } from '@/lib/oi-model';
+import { getDemoPriceHistory, getDemoSnapshot } from '@/lib/demo-data';
+import { analyzeSnapshotWithPriceHistory } from '@/lib/oi-model';
 
 export default function Home() {
   const snapshot = getDemoSnapshot();
-  const initial = analyzeSnapshot(snapshot, getDemoObservations(snapshot.symbol, snapshot.asOf), getDemoPersistence(snapshot));
+  const initial = analyzeSnapshotWithPriceHistory(snapshot, getDemoPriceHistory(snapshot.symbol, snapshot.asOf));
   return <OiDashboard initial={initial} />;
 }

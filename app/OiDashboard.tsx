@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, Database, History, LogOut, PlugZap, RefreshCw, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, History, LogOut, PlugZap, RefreshCw, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,7 +19,6 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [symbol, setSymbol] = useState(initial.snapshot.symbol);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [warning, setWarning] = useState<string | null>(null);
   const [fyers, setFyers] = useState({ configured: false, connected: initial.snapshot.source === 'fyers', checked: false });
   const [setupOpen, setSetupOpen] = useState(false);
   const [appId, setAppId] = useState('');
@@ -35,11 +34,10 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         setFyers({ ...status, checked: true });
         if (status.connected && initialSource !== 'fyers') {
           void fetch(`/api/market/chain?symbol=${encodeURIComponent(initialSymbol)}`, { cache: 'no-store' })
-            .then((response) => response.json() as Promise<{ analysis?: MarketAnalysis; error?: string; storageWarning?: string | null }>)
+            .then((response) => response.json() as Promise<{ analysis?: MarketAnalysis; error?: string }>)
             .then((payload) => {
               if (!payload.analysis) throw new Error(payload.error ?? 'Unable to load FYERS data.');
               setAnalysis(payload.analysis);
-              setWarning(payload.storageWarning ?? null);
             })
             .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load FYERS data.'));
         }
@@ -56,9 +54,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     setLoading(true); setError(null);
     try {
       const response = await fetch(`/api/market/chain?symbol=${encodeURIComponent(nextSymbol)}`, { cache: 'no-store' });
-      const payload = await response.json() as { analysis?: MarketAnalysis; error?: string; storageWarning?: string | null };
+      const payload = await response.json() as { analysis?: MarketAnalysis; error?: string };
       if (!response.ok || !payload.analysis) throw new Error(payload.error ?? 'Unable to load option-chain data.');
-      setAnalysis(payload.analysis); setWarning(payload.storageWarning ?? null);
+      setAnalysis(payload.analysis);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to refresh.');
     } finally { setLoading(false); }
@@ -114,9 +112,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       {setupOpen && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSetupOpen(false); }}><dialog open aria-labelledby="fyers-setup-title" className="relative m-0 w-full max-w-md rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl sm:p-6"><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.14em] text-primary">Broker connection</p><h2 id="fyers-setup-title" className="font-heading mt-2 text-2xl font-bold">FYERS setup</h2></div><Button variant="ghost" size="icon" aria-label="Close setup" onClick={() => setSetupOpen(false)}><X /></Button></div><p className="mt-3 text-sm leading-6 text-muted-foreground">Enter the App ID and Secret ID from your FYERS API app. They are encrypted into a protected cookie for this browser only and are never written to the site source or database.</p><div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Redirect URL in FYERS:</strong><br /><span className="break-all font-mono text-[11px]">https://oi-lens-six-month.purushothamkodidala3.chatgpt.site/api/auth/fyers/callback</span></div><form className="mt-5 grid gap-4" onSubmit={saveFyersSetup}><label htmlFor="fyers-app-id" className="grid gap-1.5 text-xs font-bold">App ID</label><Input id="fyers-app-id" className="h-10 font-mono" value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" required /><label htmlFor="fyers-secret-id" className="grid gap-1.5 text-xs font-bold">Secret ID</label><Input id="fyers-secret-id" className="h-10 font-mono" type="password" value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="new-password" required /><Button type="submit" size="lg" disabled={setupSaving}>{setupSaving ? <RefreshCw className="animate-spin" data-icon="inline-start" /> : <PlugZap data-icon="inline-start" />}{setupSaving ? 'Connecting…' : 'Save and login with FYERS'}</Button>{fyers.configured && <Button type="button" variant="ghost" className="text-muted-foreground" onClick={() => void forgetFyersSetup()}>Forget saved FYERS setup</Button>}</form></dialog></div>}
 
       <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-        {(error || warning) && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error ?? warning}</div>}
+        {error && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error}</div>}
         <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 md:grid-cols-[1fr_auto_auto] md:items-end sm:p-5">
-          <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Six-month calibrated levels</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Support and resistance from options positioning</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Current OI evidence is compared with this instrument&apos;s previous 183 calendar days (about 126 trading sessions). Scores are probabilities from tested levels, not fixed weights.</p></div>
+          <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Six-month verified levels</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Support and resistance from options positioning</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Live OI, OI change and option volume are combined with the previous 183 calendar days of FYERS daily price behaviour. History is fetched when requested and is not stored.</p></div>
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Instrument<select value={symbol} onChange={(event) => { const value = event.target.value; setSymbol(value); void load(value); }} className="h-10 min-w-56 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground">{instruments.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Expiry<select className="h-10 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground" aria-label="Expiry"><option>{snapshot.expiry}</option></select></label>
         </section>
@@ -124,13 +122,13 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         <section className="mt-4 grid gap-4 xl:grid-cols-[1.45fr_0.55fr]">
           <Card className="border-0 bg-card/90 py-0 ring-border/70"><CardContent className="p-5 sm:p-6">
             <div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-2"><h2 className="font-heading text-2xl font-bold">{snapshot.displayName}</h2><Badge variant="secondary">{snapshot.instrumentType.toUpperCase()}</Badge></div><p className="mt-1 text-sm text-muted-foreground">{snapshot.expiry} · {dateFormatter.format(new Date(snapshot.asOf))}</p></div><div className="text-right"><p className="font-mono text-3xl font-black">{money(snapshot.spot)}</p><p className={`mt-1 inline-flex items-center gap-1 text-sm font-bold ${snapshot.spotChangePercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{snapshot.spotChangePercent >= 0 ? <ArrowUpRight className="size-4" /> : <ArrowDownRight className="size-4" />}{snapshot.spotChangePercent.toFixed(2)}% today</p></div></div>
-            <div className="mt-7 grid gap-3 md:grid-cols-2"><SignalCard level={primarySupport} side="support" provisional={diagnostics.mode === 'provisional'} /><SignalCard level={primaryResistance} side="resistance" provisional={diagnostics.mode === 'provisional'} /></div>
+            <div className="mt-7 grid gap-3 md:grid-cols-2"><SignalCard level={primarySupport} side="support" mode={diagnostics.mode} /><SignalCard level={primaryResistance} side="resistance" mode={diagnostics.mode} /></div>
             {primarySupport && primaryResistance && <div className="mt-6 rounded-xl border border-border/60 bg-background/70 p-4"><div className="flex items-center justify-between text-xs font-bold"><span className="text-emerald-300">S {money(primarySupport.strike)}</span><span className="text-muted-foreground">Spot is {rangePosition}% through the selected OI range</span><span className="text-rose-300">R {money(primaryResistance.strike)}</span></div><div className="relative mt-4 h-2 rounded-full bg-gradient-to-r from-emerald-400 via-primary to-rose-400"><span className="absolute top-1/2 h-5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_12px_white]" style={{ left: `${rangePosition}%` }} /></div><div className="mt-3 flex justify-between text-[11px] text-muted-foreground"><span>{primarySupport.distancePoints.toFixed(1)} pts to support</span><strong className="text-foreground">{money(snapshot.spot)} spot</strong><span>{primaryResistance.distancePoints.toFixed(1)} pts to resistance</span></div></div>}
           </CardContent></Card>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
-            <Metric icon={<History />} label="Training window" value="6 months" detail={`${diagnostics.lookbackStart} to ${diagnostics.lookbackEnd}`} />
-            <Metric icon={<ShieldCheck />} label="Validation" value={diagnostics.mode === 'calibrated' ? 'Walk-forward' : 'Provisional'} detail={diagnostics.mode === 'calibrated' ? `${diagnostics.validationSamples} out-of-time samples` : 'Collecting tested outcomes'} />
-            <Metric icon={<Database />} label="Evidence" value={`${diagnostics.samples} tested levels`} detail={`Observed hold rate ${(diagnostics.holdRate * 100).toFixed(0)}%`} />
+            <Metric icon={<History />} label="History window" value="6 months" detail={`${diagnostics.lookbackStart} to ${diagnostics.lookbackEnd}`} />
+            <Metric icon={<ShieldCheck />} label="Historical input" value={`${diagnostics.validationSamples} sessions`} detail="Fetched directly from FYERS · not stored" />
+            <Metric icon={<Activity />} label="Zone evidence" value={`${diagnostics.samples} tests`} detail={`Observed defence rate ${(diagnostics.holdRate * 100).toFixed(0)}%`} />
             <Metric icon={<Activity />} label="Current regime" value={`PCR ${analysis.putCallRatio.toFixed(2)}`} detail={`ATR ${snapshot.atr14.toFixed(0)} · Max pain ${analysis.maxPain ? money(analysis.maxPain) : '—'}`} />
           </div>
         </section>
@@ -141,10 +139,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   );
 }
 
-function SignalCard({ level, side, provisional }: { level: LevelSignal | null; side: 'support' | 'resistance'; provisional: boolean }) {
+function SignalCard({ level, side, mode }: { level: LevelSignal | null; side: 'support' | 'resistance'; mode: MarketAnalysis['diagnostics']['mode'] }) {
   const support = side === 'support';
   if (!level) return <article className="rounded-xl border border-border p-4 text-sm text-muted-foreground">No {side} candidate in the loaded strikes.</article>;
-  return <article className={`rounded-xl border p-4 ${support ? 'border-emerald-400/20 bg-emerald-400/[0.06]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><div className="flex items-center justify-between"><span className={`text-xs font-black uppercase tracking-[0.14em] ${support ? 'text-emerald-300' : 'text-rose-300'}`}>Primary {side}</span>{support ? <ArrowDownRight className="size-4 text-emerald-300" /> : <ArrowUpRight className="size-4 text-rose-300" />}</div><p className="mt-3 font-mono text-3xl font-black">{money(level.strike)}</p><p className="mt-2 text-xs font-bold">{level.distancePoints.toFixed(1)} points · {level.distancePercent.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">{provisional ? 'Provisional score' : 'Calibrated hold probability'} {level.score}%</p></article>;
+  const label = mode === 'historical' ? 'Six-month OI + price confidence' : mode === 'provisional' ? 'Provisional score' : 'Calibrated hold probability';
+  return <article className={`rounded-xl border p-4 ${support ? 'border-emerald-400/20 bg-emerald-400/[0.06]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><div className="flex items-center justify-between"><span className={`text-xs font-black uppercase tracking-[0.14em] ${support ? 'text-emerald-300' : 'text-rose-300'}`}>Primary {side}</span>{support ? <ArrowDownRight className="size-4 text-emerald-300" /> : <ArrowUpRight className="size-4 text-rose-300" />}</div><p className="mt-3 font-mono text-3xl font-black">{money(level.strike)}</p><p className="mt-2 text-xs font-bold">{level.distancePoints.toFixed(1)} points · {level.distancePercent.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">{label} {level.score}%</p></article>;
 }
 
 function LevelCard({ level, provisional }: { level: LevelSignal; provisional: boolean }) {

@@ -1,6 +1,4 @@
-import { getDemoObservations, getDemoPersistence } from '@/lib/demo-data';
-import { loadHistoricalObservations, persistSnapshot } from '@/lib/history-store';
-import { analyzeSnapshot } from '@/lib/oi-model';
+import { analyzeSnapshotWithPriceHistory } from '@/lib/oi-model';
 import { getMarketProvider } from '@/lib/providers';
 import { readFyersAuthorization } from '@/lib/fyers-auth';
 
@@ -16,19 +14,9 @@ export async function GET(request: Request) {
   try {
     const provider = getMarketProvider(await readFyersAuthorization(request));
     const snapshot = await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
-    let observations = getDemoObservations(snapshot.symbol, snapshot.asOf);
-    let storageWarning: string | null = null;
-    if (snapshot.source === 'fyers') {
-      try {
-        await persistSnapshot(snapshot);
-        observations = await loadHistoricalObservations(snapshot.symbol, snapshot.asOf);
-      } catch {
-        observations = [];
-        storageWarning = 'Live chain loaded, but historical storage is not initialized yet.';
-      }
-    }
-    const analysis = analyzeSnapshot(snapshot, observations, getDemoPersistence(snapshot));
-    return Response.json({ analysis, provider: provider.id, storageWarning }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    const priceHistory = await provider.fetchSixMonthHistory(snapshot.symbol, snapshot.asOf);
+    const analysis = analyzeSnapshotWithPriceHistory(snapshot, priceHistory);
+    return Response.json({ analysis, provider: provider.id }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to analyze the option chain.';
     return Response.json({ error: message }, { status: 502 });

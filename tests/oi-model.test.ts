@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getDemoObservations, getDemoPersistence, getDemoSnapshot } from '../lib/demo-data.ts';
-import { analyzeSnapshot, calibrateModel, filterSixMonthObservations, labelLevelOutcome } from '../lib/oi-model.ts';
+import { getDemoObservations, getDemoPersistence, getDemoPriceHistory, getDemoSnapshot } from '../lib/demo-data.ts';
+import { analyzeSnapshot, analyzeSnapshotWithPriceHistory, atrFromPriceHistory, calibrateModel, filterSixMonthObservations, labelLevelOutcome } from '../lib/oi-model.ts';
 
 test('six-month filter excludes present and future observations', () => {
   const snapshot = getDemoSnapshot();
@@ -44,4 +44,16 @@ test('analysis returns ranked levels on both sides with valid probabilities', ()
   assert.ok(analysis.levels.every((level) => level.probability >= 0 && level.probability <= 1));
   assert.ok(analysis.primarySupport!.strike <= snapshot.spot);
   assert.ok(analysis.primaryResistance!.strike >= snapshot.spot);
+});
+
+test('on-demand six-month history produces ranked levels without stored observations', () => {
+  const snapshot = getDemoSnapshot();
+  const history = getDemoPriceHistory(snapshot.symbol, snapshot.asOf);
+  const analysis = analyzeSnapshotWithPriceHistory(snapshot, history);
+  assert.equal(analysis.diagnostics.mode, 'historical');
+  assert.ok(analysis.diagnostics.validationSamples >= 120);
+  assert.ok(analysis.diagnostics.samples > 0);
+  assert.ok(analysis.primarySupport);
+  assert.ok(analysis.primaryResistance);
+  assert.ok(atrFromPriceHistory(history) > 0);
 });

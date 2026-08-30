@@ -316,6 +316,168 @@ export function analyzeSnapshot(
   };
 }
 
+interface ZoneHistoryStats {
+  tests: number;
+  holds: number;
+  weightedHoldRate: number;
+  confidence: number;
+}
+
+export function atrFromPriceHistory(history: PriceSession[], period = 14) {
+  if (history.length < 2) return 0;
+  const trueRanges = history.slice(1).map((session, index) => {
+    const previousClose = history[index].close;
+    return Math.max(
+      session.high - session.low,
+      Math.abs(session.high - previousClose),
+      Math.abs(session.low - previousClose),
+    );
+  });
+  const selected = trueRanges.slice(-period);
+  return selected.reduce((sum, value) => sum + value, 0) / Math.max(1, selected.length);
+}
+
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function historicalZoneStats(
+  history: PriceSession[],
+  strike: number,
+  side: LevelSide,
+  atr: number,
+  strikeStep: number,
+): ZoneHistoryStats {
+  const touchTolerance = Math.max(atr * 0.18, strikeStep * 0.35);
+  const breachTolerance = atr * 0.25;
+  let tests = 0;
+  let holds = 0;
+  let weightedTests = 0;
+  let weightedHolds = 0;
+
+  for (let index = 1; index < history.length - 1; index += 1) {
+    const session = history[index];
+    const previous = history[index - 1];
+    const approachedFromExpectedSide = side === 'support'
+      ? previous.close >= strike - touchTolerance
+      : previous.close <= strike + touchTolerance;
+    const touched = session.low <= strike + touchTolerance && session.high >= strike - touchTolerance;
+    if (!approachedFromExpectedSide || !touched) continue;
+    const outcome = history.slice(index, Math.min(history.length, index + 4));
+    const breached = outcome.some((item) => side === 'support'
+      ? item.close < strike - breachTolerance
+      : item.close > strike + breachTolerance);
+    const finalClose = outcome.at(-1)?.close ?? session.close;
+    const recovered = side === 'support' ? finalClose >= strike : finalClose <= strike;
+    const held = !breached && recovered;
+    const recencyWeight = Math.exp(-(history.length - 1 - index) / 63);
+    tests += 1;
+    holds += Number(held);
+    weightedTests += recencyWeight;
+    weightedHolds += held ? recencyWeight : 0;
+    index += 2;
+  }
+
+  const weightedHoldRate = (weightedHolds + 1) / (weightedTests + 2);
+  const confidence = 1 - Math.exp(-tests / 4);
+  return { tests, holds, weightedHoldRate, confidence };
+}
+
+export function analyzeSnapshotWithPriceHistory(
+  snapshot: MarketSnapshot,
+  priceHistory: PriceSession[],
+): MarketAnalysis {
+  const asOfDate = snapshot.asOf.slice(0, 10);
+  const history = priceHistory
+    .filter((session) => isValidDate(session.date) && session.date < asOfDate)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-140);
+  const calculatedAtr = atrFromPriceHistory(history);
+  const liveSnapshot = { ...snapshot, atr14: calculatedAtr > 0 ? calculatedAtr : snapshot.atr14 };
+  const recentRanges = history.slice(-63).map((session) => session.high - session.low);
+  const typicalRange = median(recentRanges);
+  const regimeFit = typicalRange > 0
+    ? clamp(1 - Math.abs(Math.log(liveSnapshot.atr14 / typicalRange)) / 1.5)
+    : 0.5;
+  const baseCandidates = candidates(liveSnapshot, {});
+  let totalTests = 0;
+  let totalHolds = 0;
+
+  const scored = baseCandidates.map((candidate) => {
+    const historyStats = historicalZoneStats(
+      history,
+      candidate.strike,
+      candidate.side,
+      liveSnapshot.atr14,
+      liveSnapshot.strikeStep,
+    );
+    totalTests += historyStats.tests;
+    totalHolds += historyStats.holds;
+    const historicalDefense = 0.5 * (1 - historyStats.confidence)
+      + historyStats.weightedHoldRate * historyStats.confidence;
+    const features: LevelFeatures = {
+      ...candidate.features,
+      persistence: historicalDefense,
+      regimeFit,
+    };
+    const oiChangeStrength = (features.oiChange + 1) / 2;
+    const evidence =
+      features.clusterOi * 0.30
+      + oiChangeStrength * 0.16
+      + features.volumeConfirmation * 0.12
+      + features.proximity * 0.12
+      + features.persistence * 0.24
+      + features.regimeFit * 0.06;
+    const probability = clamp(0.12 + evidence * 0.78, 0.05, 0.95);
+    return {
+      ...candidate,
+      features,
+      rank: 0,
+      probability,
+      score: Math.round(probability * 100),
+      distancePoints: Math.abs(liveSnapshot.spot - candidate.strike),
+      distancePercent: (Math.abs(liveSnapshot.spot - candidate.strike) / liveSnapshot.spot) * 100,
+    };
+  });
+
+  const levels = (['support', 'resistance'] as const).flatMap((side) =>
+    scored
+      .filter((level) => level.side === side)
+      .sort((a, b) => b.probability - a.probability || a.distancePoints - b.distancePoints)
+      .slice(0, 3)
+      .map((level, index) => ({ ...level, rank: index + 1 })),
+  );
+  const primarySupport = levels.find((level) => level.side === 'support' && level.rank === 1) ?? null;
+  const primaryResistance = levels.find((level) => level.side === 'resistance' && level.rank === 1) ?? null;
+  const totalPutOi = liveSnapshot.chain.reduce((sum, row) => sum + row.putOi, 0);
+  const totalCallOi = liveSnapshot.chain.reduce((sum, row) => sum + row.callOi, 0);
+  const range = primarySupport && primaryResistance ? primaryResistance.strike - primarySupport.strike : 0;
+
+  return {
+    snapshot: liveSnapshot,
+    levels,
+    primarySupport,
+    primaryResistance,
+    putCallRatio: totalCallOi ? totalPutOi / totalCallOi : 0,
+    maxPain: maxPain(liveSnapshot),
+    rangePosition: range > 0 && primarySupport ? clamp((liveSnapshot.spot - primarySupport.strike) / range) : null,
+    diagnostics: {
+      mode: 'historical',
+      lookbackStart: history[0]?.date ?? isoDate(new Date(Date.parse(snapshot.asOf) - SIX_MONTH_DAYS * DAY)),
+      lookbackEnd: history.at(-1)?.date ?? isoDate(new Date(Date.parse(snapshot.asOf) - DAY)),
+      samples: totalTests,
+      validationSamples: history.length,
+      holdRate: totalHolds / Math.max(1, totalTests),
+      balancedAccuracy: null,
+      brierScore: null,
+      note: 'No snapshots are stored. Current OI is confirmed by six months of FYERS daily price-zone tests, weighted toward recent sessions.',
+    },
+  };
+}
+
 export function labelLevelOutcome(
   level: number,
   side: LevelSide,
