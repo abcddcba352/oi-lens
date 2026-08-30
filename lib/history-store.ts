@@ -9,6 +9,9 @@ const DAY = 86_400_000;
 
 const REFRESH_OVERLAP_DAYS = 5;
 const SNAPSHOT_BUCKET_MINUTES = 15;
+// D1 has a conservative bound-parameter ceiling. A strike row can bind up to
+// eleven values, so small chunks keep every insert safely below that limit.
+const STRIKE_INSERT_CHUNK = 8;
 
 function dateOffset(date: string, days: number) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
@@ -31,8 +34,9 @@ export async function persistSnapshot(snapshot: MarketSnapshot) {
   const bucket = captured.toISOString();
   const snapshotId = `${snapshot.symbol}:${snapshot.expiryEpoch ?? snapshot.expiry}:${bucket}`;
   await db.insert(oiSnapshots).values({ id: snapshotId, instrumentId, capturedAt: snapshot.asOf, expiry: snapshot.expiry, expiryEpoch: snapshot.expiryEpoch, spot: snapshot.spot, spotChangePercent: snapshot.spotChangePercent, atr14: snapshot.atr14, ivPercentile: snapshot.ivPercentile, source: snapshot.source }).onConflictDoNothing();
-  if (snapshot.chain.length) {
-    await db.insert(oiStrikes).values(snapshot.chain.map((row) => ({ id: `${snapshotId}:${row.strike}`, snapshotId, ...row }))).onConflictDoNothing();
+  const values = snapshot.chain.map((row) => ({ id: `${snapshotId}:${row.strike}`, snapshotId, ...row }));
+  for (let index = 0; index < values.length; index += STRIKE_INSERT_CHUNK) {
+    await db.insert(oiStrikes).values(values.slice(index, index + STRIKE_INSERT_CHUNK)).onConflictDoNothing();
   }
   return true;
 }

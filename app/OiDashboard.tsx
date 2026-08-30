@@ -25,6 +25,7 @@ interface DataStatus {
   historySessions: number;
   latestSession: string | null;
   oiSnapshotStored: boolean;
+  oiSnapshotWarning: string | null;
   oiSnapshotIntervalMinutes: number;
 }
 
@@ -152,7 +153,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             <Metric icon={<History />} label="History window" value="6 months" detail={`${diagnostics.lookbackStart} to ${diagnostics.lookbackEnd}`} />
             <Metric icon={<ShieldCheck />} label="Historical input" value={`${diagnostics.validationSamples} sessions`} detail={dataStatus ? `${historyStatus(dataStatus.historySource)} · latest ${dataStatus.latestSession ?? '—'}` : 'Connect FYERS to initialize the history cache'} />
             <Metric icon={<Activity />} label="Zone evidence" value={`${diagnostics.samples} tests`} detail={`Observed defence rate ${(diagnostics.holdRate * 100).toFixed(0)}%`} />
-            <Metric icon={<Activity />} label="OI archive" value={dataStatus?.oiSnapshotStored ? 'Recording' : 'Waiting for FYERS'} detail={dataStatus ? `One snapshot per ${dataStatus.oiSnapshotIntervalMinutes}-minute window` : 'Builds historical OI evidence over time'} />
+            <Metric icon={<Activity />} label="OI archive" value={dataStatus?.oiSnapshotStored ? 'Recording' : dataStatus?.oiSnapshotWarning ? 'Retry pending' : 'Waiting for FYERS'} detail={dataStatus?.oiSnapshotWarning ?? (dataStatus ? `One snapshot per ${dataStatus.oiSnapshotIntervalMinutes}-minute window` : 'Builds historical OI evidence over time')} />
             <Metric icon={<Activity />} label="Current regime" value={`PCR ${analysis.putCallRatio.toFixed(2)}`} detail={`ATR ${snapshot.atr14.toFixed(0)} · Max pain ${analysis.maxPain ? money(analysis.maxPain) : '—'}`} />
           </div>
         </section>

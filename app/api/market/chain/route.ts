@@ -17,7 +17,14 @@ export async function GET(request: Request) {
     const snapshot = await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
     const cached = await loadOrRefreshPriceHistory(provider, snapshot);
     const analysis = analyzeSnapshotWithPriceHistory(snapshot, cached.history);
-    const oiSnapshotStored = await persistSnapshot(analysis.snapshot);
+    let oiSnapshotStored = false;
+    let oiSnapshotWarning: string | null = null;
+    try {
+      oiSnapshotStored = await persistSnapshot(analysis.snapshot);
+    } catch {
+      // Archival improves the future model but must never block today's live analysis.
+      oiSnapshotWarning = 'Live analysis loaded. OI archival will retry on the next refresh.';
+    }
     return Response.json({
       analysis,
       provider: provider.id,
@@ -26,6 +33,7 @@ export async function GET(request: Request) {
         historySessions: cached.history.length,
         latestSession: cached.latestSession,
         oiSnapshotStored,
+        oiSnapshotWarning,
         oiSnapshotIntervalMinutes: 15,
       },
     }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } });
