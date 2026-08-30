@@ -1,7 +1,7 @@
 'use client';
 
-import { useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, Database, History, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Activity, ArrowDownRight, ArrowUpRight, Database, History, LogOut, PlugZap, RefreshCw, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -19,6 +19,29 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [fyers, setFyers] = useState({ configured: false, connected: initial.snapshot.source === 'fyers', checked: false });
+  const initialSource = initial.snapshot.source;
+  const initialSymbol = initial.snapshot.symbol;
+
+  useEffect(() => {
+    void fetch('/api/auth/fyers/status', { cache: 'no-store' })
+      .then((response) => response.json() as Promise<{ configured: boolean; connected: boolean }>)
+      .then((status) => {
+        setFyers({ ...status, checked: true });
+        if (status.connected && initialSource !== 'fyers') {
+          void fetch(`/api/market/chain?symbol=${encodeURIComponent(initialSymbol)}`, { cache: 'no-store' })
+            .then((response) => response.json() as Promise<{ analysis?: MarketAnalysis; error?: string; storageWarning?: string | null }>)
+            .then((payload) => {
+              if (!payload.analysis) throw new Error(payload.error ?? 'Unable to load FYERS data.');
+              setAnalysis(payload.analysis);
+              setWarning(payload.storageWarning ?? null);
+            })
+            .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load FYERS data.'));
+        }
+      })
+      .catch(() => setFyers((current) => ({ ...current, checked: true })));
+    if (new URLSearchParams(window.location.search).has('fyers')) window.history.replaceState({}, '', window.location.pathname);
+  }, [initialSource, initialSymbol]);
 
   async function load(nextSymbol = symbol) {
     setLoading(true); setError(null);
@@ -32,6 +55,12 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     } finally { setLoading(false); }
   }
 
+  async function disconnectFyers() {
+    await fetch('/api/auth/fyers/logout', { method: 'POST' });
+    setFyers((current) => ({ ...current, connected: false }));
+    window.location.reload();
+  }
+
   const { snapshot, diagnostics, primarySupport, primaryResistance } = analysis;
   const modeLabel = snapshot.source === 'fyers' ? 'FYERS live chain' : 'Demo data · FYERS ready';
   const dateFormatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
@@ -42,7 +71,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       <header className="border-b border-border/70 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-primary font-mono text-sm font-black text-primary-foreground shadow-[0_0_28px_color-mix(in_oklch,var(--primary),transparent_70%)]">OI</span><div><p className="font-heading text-lg font-bold tracking-tight">OI Lens</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Derivative structure lab</p></div></div>
-          <div className="flex items-center gap-2"><Badge variant="outline" className={snapshot.source === 'fyers' ? 'h-7 border-emerald-300/25 bg-emerald-300/10 px-3 text-emerald-200' : 'h-7 border-amber-300/25 bg-amber-300/10 px-3 text-amber-200'}>{modeLabel}</Badge><Button variant="outline" size="lg" className="border-border/80 bg-card" disabled={loading} onClick={() => load()}><RefreshCw className={loading ? 'animate-spin' : ''} data-icon="inline-start" />Refresh</Button></div>
+          <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline" className={snapshot.source === 'fyers' ? 'h-7 border-emerald-300/25 bg-emerald-300/10 px-3 text-emerald-200' : 'h-7 border-amber-300/25 bg-amber-300/10 px-3 text-amber-200'}>{modeLabel}</Badge>{fyers.checked && (fyers.connected ? <Button variant="outline" size="lg" className="border-border/80 bg-card" onClick={() => void disconnectFyers()}><LogOut data-icon="inline-start" />Disconnect FYERS</Button> : <Button variant="outline" size="lg" className="border-primary/40 bg-primary/10 text-primary" disabled={!fyers.configured} title={fyers.configured ? 'Open secure FYERS login' : 'Add FYERS App ID and Secret ID to enable login'} onClick={() => window.location.assign('/api/auth/fyers/login')}><PlugZap data-icon="inline-start" />{fyers.configured ? 'Connect FYERS' : 'FYERS setup needed'}</Button>)}<Button variant="outline" size="lg" className="border-border/80 bg-card" disabled={loading} onClick={() => load()}><RefreshCw className={loading ? 'animate-spin' : ''} data-icon="inline-start" />Refresh</Button></div>
         </div>
       </header>
 

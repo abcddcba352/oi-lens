@@ -2,6 +2,7 @@ import { getDemoObservations, getDemoPersistence } from '@/lib/demo-data';
 import { loadHistoricalObservations, persistSnapshot } from '@/lib/history-store';
 import { analyzeSnapshot } from '@/lib/oi-model';
 import { getMarketProvider } from '@/lib/providers';
+import { readFyersAuthorization } from '@/lib/fyers-auth';
 
 const SYMBOL = /^(NSE|BSE):[A-Z0-9&._-]+-(EQ|INDEX)$/;
 
@@ -13,7 +14,7 @@ export async function GET(request: Request) {
   const expiryEpoch = expiryRaw ? Number(expiryRaw) : undefined;
   if (expiryRaw && (!Number.isInteger(expiryEpoch) || (expiryEpoch ?? 0) <= 0)) return Response.json({ error: 'Expiry must be a positive Unix timestamp.' }, { status: 400 });
   try {
-    const provider = getMarketProvider();
+    const provider = getMarketProvider(await readFyersAuthorization(request));
     const snapshot = await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
     let observations = getDemoObservations(snapshot.symbol, snapshot.asOf);
     let storageWarning: string | null = null;

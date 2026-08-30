@@ -29,8 +29,12 @@ const names: Record<string, { displayName: string; instrumentType: 'index' | 'st
 
 export class FyersProvider implements MarketDataProvider {
   readonly id = 'fyers' as const;
-  private readonly token = process.env.FYERS_AUTH_TOKEN;
+  private readonly token: string | undefined;
   private readonly baseUrl = process.env.FYERS_API_BASE ?? 'https://api-t1.fyers.in';
+
+  constructor(token?: string | null) {
+    this.token = token ?? process.env.FYERS_AUTH_TOKEN;
+  }
 
   isConfigured() {
     return Boolean(this.token);
