@@ -20,7 +20,8 @@ export async function GET(request: Request) {
     const sealed = await exchangeFyersAuthCode(request, code);
     returnUrl.searchParams.set('fyers', 'connected');
     return redirectWithCookies(returnUrl, [sessionCookie(request, sealed), ...clearFyersSessionCookies(request).slice(0, 1)]);
-  } catch {
+  } catch (error) {
+    console.error('FYERS token exchange failed:', error instanceof Error ? error.message : 'Unknown error');
     returnUrl.searchParams.set('fyers', 'failed');
     return redirectWithCookies(returnUrl, clearFyersSessionCookies(request));
   }

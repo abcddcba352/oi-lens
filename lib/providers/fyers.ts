@@ -53,14 +53,20 @@ export class FyersProvider implements MarketDataProvider {
     let response: Response;
     try {
       response = await fetch(url, {
-        headers: { Authorization: this.token, Accept: 'application/json' },
+        headers: { Authorization: this.token, Accept: 'application/json', 'User-Agent': 'OI-Lens/1.0 FYERS-API-Client' },
         cache: 'no-store',
         signal: controller.signal,
       });
     } finally {
       clearTimeout(timeout);
     }
-    const payload = (await response.json()) as FyersChainResponse;
+    const body = await response.text();
+    let payload: FyersChainResponse;
+    try {
+      payload = JSON.parse(body) as FyersChainResponse;
+    } catch {
+      throw new Error(`FYERS returned an unexpected response for the option chain (${response.status}). Please reconnect FYERS and try again.`);
+    }
     if (!response.ok || payload.s === 'error' || !payload.data?.optionsChain) {
       throw new Error(payload.message ?? `FYERS option-chain request failed (${response.status}).`);
     }

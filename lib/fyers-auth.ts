@@ -72,13 +72,21 @@ export async function createFyersLogin(request: Request) {
 export async function exchangeFyersAuthCode(request: Request, code: string) {
   const credentials = await readFyersCredentials(request);
   if (!credentials) throw new Error('FYERS credentials are missing.');
-  const appIdHash = await sha256Hex(`${credentials.appId}${credentials.secretId}`);
+  const appIdHash = await sha256Hex(`${credentials.appId}:${credentials.secretId}`);
   const response = await fetch(new URL('/api/v3/validate-authcode', apiBase()), {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'OI-Lens/1.0 FYERS-API-Client',
+    },
     body: JSON.stringify({ grant_type: 'authorization_code', appIdHash, code }),
   });
-  const payload = (await response.json()) as FyersTokenResponse;
+  const body = await response.text();
+  const payload = parseJson<FyersTokenResponse>(body);
+  if (!payload) {
+    throw new Error(`FYERS authentication returned an unexpected response (${response.status}).`);
+  }
   if (!response.ok || payload.s === 'error' || !payload.access_token) {
     throw new Error(payload.message ?? `FYERS token exchange failed (${response.status}).`);
   }
@@ -182,6 +190,14 @@ async function aesKey(material: string) {
 async function sha256Hex(value: string) {
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
   return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function parseJson<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
 }
 
 function randomBase64Url(bytes: number) {

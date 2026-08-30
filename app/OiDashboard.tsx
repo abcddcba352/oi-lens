@@ -45,7 +45,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         }
       })
       .catch(() => setFyers((current) => ({ ...current, checked: true })));
-    if (new URLSearchParams(window.location.search).has('fyers')) window.history.replaceState({}, '', window.location.pathname);
+    const result = new URLSearchParams(window.location.search).get('fyers');
+    if (result === 'failed') {
+      queueMicrotask(() => setError('FYERS login could not create an access token. Recheck the App ID and Secret ID, then connect again.'));
+    }
+    if (result) window.history.replaceState({}, '', window.location.pathname);
   }, [initialSource, initialSymbol]);
 
   async function load(nextSymbol = symbol) {
