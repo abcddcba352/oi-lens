@@ -1,6 +1,7 @@
 import { analyzeSnapshotWithPriceHistory } from '@/lib/oi-model';
 import { getMarketProvider } from '@/lib/providers';
 import { readFyersAuthorization } from '@/lib/fyers-auth';
+import { loadOrRefreshPriceHistory, persistSnapshot } from '@/lib/history-store';
 
 const SYMBOL = /^(NSE|BSE):[A-Z0-9&._-]+-(EQ|INDEX)$/;
 
@@ -14,9 +15,20 @@ export async function GET(request: Request) {
   try {
     const provider = getMarketProvider(await readFyersAuthorization(request));
     const snapshot = await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
-    const priceHistory = await provider.fetchSixMonthHistory(snapshot.symbol, snapshot.asOf);
-    const analysis = analyzeSnapshotWithPriceHistory(snapshot, priceHistory);
-    return Response.json({ analysis, provider: provider.id }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+    const cached = await loadOrRefreshPriceHistory(provider, snapshot);
+    const analysis = analyzeSnapshotWithPriceHistory(snapshot, cached.history);
+    const oiSnapshotStored = await persistSnapshot(analysis.snapshot);
+    return Response.json({
+      analysis,
+      provider: provider.id,
+      dataStatus: {
+        historySource: cached.source,
+        historySessions: cached.history.length,
+        latestSession: cached.latestSession,
+        oiSnapshotStored,
+        oiSnapshotIntervalMinutes: 15,
+      },
+    }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to analyze the option chain.';
     return Response.json({ error: message }, { status: 502 });

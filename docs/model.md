@@ -1,6 +1,6 @@
 # OI Lens six-month model
 
-OI Lens treats current open-interest walls as candidates, not automatic support or resistance. It fetches the live FYERS option chain and the underlying instrument's previous 183 calendar days of daily candles on each request. Historical values are not stored.
+OI Lens treats current open-interest walls as candidates, not automatic support or resistance. It fetches the live FYERS option chain on each request. The first request for an instrument backfills the previous 183 calendar days of daily candles; later requests re-fetch only a five-day overlap and retain the merged history.
 
 ## Current option-chain evidence
 
@@ -38,7 +38,8 @@ This is an evidence confidence score, not a guaranteed probability of a future h
 
 ## Data architecture
 
-- The live option chain and six-month daily history are fetched server-side from FYERS.
-- No option-chain snapshots or historical candles are saved in the site database.
+- The live option chain and the newest daily candles are fetched server-side from FYERS.
+- Daily candles are cached by instrument and session date. Recent rows are upserted so corrected candles replace older values.
+- Live option-chain snapshots are retained at most once per instrument, expiry, and 15-minute window. These snapshots build the dataset needed for future historical-OI calibration.
 - The provider interface remains broker-neutral so another licensed data source can be added later.
 - Scraping exchange pages is intentionally excluded.

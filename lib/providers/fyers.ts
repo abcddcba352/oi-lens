@@ -130,16 +130,14 @@ export class FyersProvider implements MarketDataProvider {
     };
   }
 
-  async fetchSixMonthHistory(symbol: string, asOf: string): Promise<PriceSession[]> {
+  async fetchPriceHistory(symbol: string, fromDate: string, toDate: string): Promise<PriceSession[]> {
     if (!this.token) throw new Error('Connect FYERS to load six-month history.');
-    const end = new Date(asOf);
-    const start = new Date(end.getTime() - 183 * 86_400_000);
     const url = new URL('/data/history', this.baseUrl);
     url.searchParams.set('symbol', symbol);
     url.searchParams.set('resolution', 'D');
     url.searchParams.set('date_format', '1');
-    url.searchParams.set('range_from', start.toISOString().slice(0, 10));
-    url.searchParams.set('range_to', end.toISOString().slice(0, 10));
+    url.searchParams.set('range_from', fromDate);
+    url.searchParams.set('range_to', toDate);
     url.searchParams.set('cont_flag', '0');
     const response = await fetch(url, {
       headers: { Authorization: this.token, Accept: 'application/json', 'User-Agent': 'OI-Lens/1.0 FYERS-API-Client' },
@@ -163,7 +161,6 @@ export class FyersProvider implements MarketDataProvider {
         open: row[1], high: row[2], low: row[3], close: row[4], volume: row[5],
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
-    if (sessions.length < 20) throw new Error('FYERS returned too few daily sessions for six-month analysis.');
     return sessions;
   }
 }

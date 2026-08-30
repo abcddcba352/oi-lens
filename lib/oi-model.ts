@@ -473,7 +473,7 @@ export function analyzeSnapshotWithPriceHistory(
       holdRate: totalHolds / Math.max(1, totalTests),
       balancedAccuracy: null,
       brierScore: null,
-      note: 'No snapshots are stored. Current OI is confirmed by six months of FYERS daily price-zone tests, weighted toward recent sessions.',
+      note: 'Current OI is confirmed by six months of cached FYERS daily price-zone tests, weighted toward recent sessions. OI snapshots are retained for future historical calibration.',
     },
   };
 }

@@ -10,5 +10,5 @@ export interface MarketDataProvider {
   readonly id: 'fyers' | 'demo';
   isConfigured(): boolean;
   fetchOptionChain(request: ChainRequest): Promise<MarketSnapshot>;
-  fetchSixMonthHistory(symbol: string, asOf: string): Promise<PriceSession[]>;
+  fetchPriceHistory(symbol: string, fromDate: string, toDate: string): Promise<PriceSession[]>;
 }

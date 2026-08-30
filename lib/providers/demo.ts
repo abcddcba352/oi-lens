@@ -12,7 +12,8 @@ export class DemoProvider implements MarketDataProvider {
     return getDemoSnapshot(request.symbol);
   }
 
-  async fetchSixMonthHistory(symbol: string, asOf: string) {
-    return getDemoPriceHistory(symbol, asOf);
+  async fetchPriceHistory(symbol: string, fromDate: string, toDate: string) {
+    return getDemoPriceHistory(symbol, `${toDate}T12:00:00.000Z`)
+      .filter((session) => session.date >= fromDate && session.date <= toDate);
   }
 }

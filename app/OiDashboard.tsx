@@ -14,11 +14,20 @@ const instruments = [
   ['NSE:RELIANCE-EQ', 'RELIANCE · Reliance Industries'],
 ] as const;
 
+interface DataStatus {
+  historySource: 'backfilled' | 'incremental' | 'cache';
+  historySessions: number;
+  latestSession: string | null;
+  oiSnapshotStored: boolean;
+  oiSnapshotIntervalMinutes: number;
+}
+
 export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [analysis, setAnalysis] = useState(initial);
   const [symbol, setSymbol] = useState(initial.snapshot.symbol);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
   const [fyers, setFyers] = useState({ configured: false, connected: initial.snapshot.source === 'fyers', checked: false });
   const [setupOpen, setSetupOpen] = useState(false);
   const [appId, setAppId] = useState('');
@@ -34,10 +43,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         setFyers({ ...status, checked: true });
         if (status.connected && initialSource !== 'fyers') {
           void fetch(`/api/market/chain?symbol=${encodeURIComponent(initialSymbol)}`, { cache: 'no-store' })
-            .then((response) => response.json() as Promise<{ analysis?: MarketAnalysis; error?: string }>)
+            .then((response) => response.json() as Promise<{ analysis?: MarketAnalysis; dataStatus?: DataStatus; error?: string }>)
             .then((payload) => {
               if (!payload.analysis) throw new Error(payload.error ?? 'Unable to load FYERS data.');
               setAnalysis(payload.analysis);
+              setDataStatus(payload.dataStatus ?? null);
             })
             .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load FYERS data.'));
         }
@@ -54,9 +64,10 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     setLoading(true); setError(null);
     try {
       const response = await fetch(`/api/market/chain?symbol=${encodeURIComponent(nextSymbol)}`, { cache: 'no-store' });
-      const payload = await response.json() as { analysis?: MarketAnalysis; error?: string };
+      const payload = await response.json() as { analysis?: MarketAnalysis; dataStatus?: DataStatus; error?: string };
       if (!response.ok || !payload.analysis) throw new Error(payload.error ?? 'Unable to load option-chain data.');
       setAnalysis(payload.analysis);
+      setDataStatus(payload.dataStatus ?? null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to refresh.');
     } finally { setLoading(false); }
@@ -114,7 +125,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         {error && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error}</div>}
         <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 md:grid-cols-[1fr_auto_auto] md:items-end sm:p-5">
-          <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Six-month verified levels</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Support and resistance from options positioning</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Live OI, OI change and option volume are combined with the previous 183 calendar days of FYERS daily price behaviour. History is fetched when requested and is not stored.</p></div>
+          <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Six-month verified levels</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Support and resistance from options positioning</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">Live OI, OI change and option volume are combined with 183 calendar days of FYERS daily price behaviour. History is cached once and only recent sessions are refreshed.</p></div>
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Instrument<select value={symbol} onChange={(event) => { const value = event.target.value; setSymbol(value); void load(value); }} className="h-10 min-w-56 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground">{instruments.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Expiry<select className="h-10 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground" aria-label="Expiry"><option>{snapshot.expiry}</option></select></label>
         </section>
@@ -127,8 +138,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
           </CardContent></Card>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
             <Metric icon={<History />} label="History window" value="6 months" detail={`${diagnostics.lookbackStart} to ${diagnostics.lookbackEnd}`} />
-            <Metric icon={<ShieldCheck />} label="Historical input" value={`${diagnostics.validationSamples} sessions`} detail="Fetched directly from FYERS · not stored" />
+            <Metric icon={<ShieldCheck />} label="Historical input" value={`${diagnostics.validationSamples} sessions`} detail={dataStatus ? `${historyStatus(dataStatus.historySource)} · latest ${dataStatus.latestSession ?? '—'}` : 'Connect FYERS to initialize the history cache'} />
             <Metric icon={<Activity />} label="Zone evidence" value={`${diagnostics.samples} tests`} detail={`Observed defence rate ${(diagnostics.holdRate * 100).toFixed(0)}%`} />
+            <Metric icon={<Activity />} label="OI archive" value={dataStatus?.oiSnapshotStored ? 'Recording' : 'Waiting for FYERS'} detail={dataStatus ? `One snapshot per ${dataStatus.oiSnapshotIntervalMinutes}-minute window` : 'Builds historical OI evidence over time'} />
             <Metric icon={<Activity />} label="Current regime" value={`PCR ${analysis.putCallRatio.toFixed(2)}`} detail={`ATR ${snapshot.atr14.toFixed(0)} · Max pain ${analysis.maxPain ? money(analysis.maxPain) : '—'}`} />
           </div>
         </section>
@@ -158,3 +170,8 @@ function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: 
 function money(value: number) { return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(value); }
 function compact(value: number) { return new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 }).format(value); }
 function signedCompact(value: number) { return `${value >= 0 ? '+' : ''}${compact(value)}`; }
+function historyStatus(value: DataStatus['historySource']) {
+  if (value === 'backfilled') return 'Six months cached';
+  if (value === 'incremental') return 'Recent sessions refreshed';
+  return 'History cache current';
+}
