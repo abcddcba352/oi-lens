@@ -21,8 +21,10 @@ export async function GET(request: Request) {
     returnUrl.searchParams.set('fyers', 'connected');
     return redirectWithCookies(returnUrl, [sessionCookie(request, sealed), ...clearFyersSessionCookies(request).slice(0, 1)]);
   } catch (error) {
-    console.error('FYERS token exchange failed:', error instanceof Error ? error.message : 'Unknown error');
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    console.error('FYERS token exchange failed:', message);
     returnUrl.searchParams.set('fyers', 'failed');
+    returnUrl.searchParams.set('fyersError', message.slice(0, 240));
     return redirectWithCookies(returnUrl, clearFyersSessionCookies(request));
   }
 }

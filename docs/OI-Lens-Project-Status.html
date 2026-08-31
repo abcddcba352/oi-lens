@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="te">
+<head>
+  <meta charset="utf-8" />
+  <title>OI Lens — Project Status & Future Plan</title>
+  <style>
+    @page { size: A4; margin: 15mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #172033; font: 13px/1.55 "Nirmala UI", "Segoe UI", Arial, sans-serif; }
+    h1, h2, h3 { color: #0b3b66; margin: 0 0 8px; }
+    h1 { font-size: 27px; }
+    h2 { font-size: 18px; margin-top: 20px; padding-bottom: 5px; border-bottom: 2px solid #d8e6f2; }
+    h3 { font-size: 14px; margin-top: 14px; }
+    p { margin: 5px 0 9px; }
+    ul, ol { margin: 5px 0 10px 22px; padding: 0; }
+    li { margin: 3px 0; }
+    table { width: 100%; border-collapse: collapse; margin: 9px 0 14px; font-size: 12px; }
+    th, td { border: 1px solid #c9d7e5; padding: 6px 7px; text-align: left; vertical-align: top; }
+    th { background: #eaf3fa; color: #0b3b66; }
+    code { font: 11px Consolas, monospace; color: #173c57; overflow-wrap: anywhere; }
+    .hero { padding: 18px 20px; border-radius: 12px; color: white; background: linear-gradient(135deg, #073b63, #087e8b); }
+    .hero h1 { color: white; }
+    .hero p { margin: 3px 0; color: #e9f7fa; }
+    .status { display: inline-block; margin-top: 8px; padding: 4px 10px; border-radius: 20px; color: #075437; background: #dff7ea; font-weight: 700; }
+    .note { padding: 9px 12px; border-left: 4px solid #e79b26; background: #fff7e8; }
+    .good { color: #0a6a45; font-weight: 700; }
+    .next { color: #9a5d00; font-weight: 700; }
+    .small { color: #516274; font-size: 11px; }
+    .page-break { break-before: page; }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <h1>OI Lens — Project Status & Future Plan</h1>
+    <p>Local-only F&amp;O Support / Resistance Analysis</p>
+    <p>Report date: 31 August 2026</p>
+    <span class="status">NSE 6-month OI import completed &amp; verified</span>
+  </section>
+
+  <h2>1. Project అంటే ఏమిటి?</h2>
+  <p><strong>OI Lens</strong> అనేది NSE F&amp;O stocks మరియు indices కోసం Open Interest (OI), OI change, option volume, price history మరియు పాత wall outcomes ఉపయోగించి support/resistance zones చూపించే local web app.</p>
+  <p>ఇది guaranteed trading signal కాదు. ఇది data-based decision-support tool. ప్రతి stock తన సొంత historical data నుంచే నేర్చుకోవాలి; ఒక stock data‌ను ఇంకొక stock‌కు కలపకూడదు అనే rule అమలులో ఉంది.</p>
+
+  <h2>2. Project ప్రస్తుతం ఏమి చేస్తుంది?</h2>
+  <ul>
+    <li>FYERS login ద్వారా live option chain మరియు six-month price history తీసుకుంటుంది.</li>
+    <li>Pure OI wall కాకుండా OI cluster, fresh OI/unwinding, volume, spot distance, persistence, volatility regimeలను కలిపి rank చేస్తుంది.</li>
+    <li>Intraday మరియు positional/longer-term support-resistanceలను విడిగా చూపిస్తుంది.</li>
+    <li>Support/resistanceను exact point‌గా కాకుండా zone, invalidation level మరియు confidence/strengthతో చూపిస్తుంది.</li>
+    <li>పాత predictionను తరువాతి price candlesతో test చేసి “reached, held, bounced, broke” outcomesగా save చేయగలదు.</li>
+    <li>Stock model index model కంటే వేరే liquidity filters, ATR width మరియు weighting ఉపయోగిస్తుంది.</li>
+  </ul>
+
+  <h2>3. Current status</h2>
+  <table>
+    <tr><th>Work item</th><th>Status</th><th>Meaning</th></tr>
+    <tr><td>Local site</td><td class="good">Completed</td><td><code>http://localhost:3000</code> వద్ద local-onlyగా నడుస్తుంది.</td></tr>
+    <tr><td>FYERS authentication</td><td class="good">Working</td><td>Manual test access token generate చేసింది; secret/token UIలో చూపించబడదు.</td></tr>
+    <tr><td>Stock-specific logic</td><td class="good">Completed</td><td>ప్రతి stock/index తన data మాత్రమే ఉపయోగిస్తుంది.</td></tr>
+    <tr><td>Six-month price analysis</td><td class="good">Completed</td><td>FYERS daily candles cache చేసి price zones/regime/ATRలో ఉపయోగిస్తుంది.</td></tr>
+    <tr><td>D1 historical storage</td><td class="good">Completed</td><td>OI snapshots, strikes, sessions, wall predictions మరియు outcomes local D1లో నిల్వ అవుతాయి.</td></tr>
+    <tr><td>Free NSE OI importer</td><td class="good">Completed</td><td>Official NSE F&amp;O UDiFF EOD bhavcopy importer తయారైంది.</td></tr>
+    <tr><td>Tracked stock OI import</td><td class="good">Completed</td><td>7 stocks × 123 trading days = 861 EOD snapshots verified.</td></tr>
+    <tr><td>Historical wall outcome generation</td><td class="next">Next step</td><td>Imported OI wallsను matching daily OHLCతో evaluate చేసి calibrated samples పెంచాలి.</td></tr>
+    <tr><td>Automated daily update</td><td class="next">Future</td><td>Market close తర్వాత NSE EOD file automatically import చేయాలి.</td></tr>
+  </table>
+
+  <h2>4. NSE import result</h2>
+  <p>Source: official NSE derivatives UDiFF Common Bhavcopy Final. Imported range: <strong>02 March 2026 to 31 August 2026</strong>.</p>
+  <table>
+    <tr><th>Instrument</th><th>EOD OI snapshots</th><th>First day</th><th>Last day</th></tr>
+    <tr><td>HDFCBANK</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><td>ICICIBANK</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><td>INFY</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><td>ITC</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><td>RELIANCE</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><td>SBIN</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><td>TCS</td><td>123</td><td>2026-03-02</td><td>2026-08-31</td></tr>
+    <tr><th>Total</th><th>861 snapshots</th><th colspan="2">40,799 idempotent database statements processed</th></tr>
+  </table>
+  <div class="note"><strong>Important:</strong> ఇది EOD OI data. Historical 15-minute intraday OI కాదు. Current intraday accuracy పెరగాలంటే app market hoursలో ప్రతి 15 minutes live snapshot save చేయాలి.</div>
+
+  <h2 class="page-break">5. Support/Resistance learning flow</h2>
+  <ol>
+    <li>ఆ రోజు nearest-expiry option chain నుంచి major put OI clusters = support candidates; major call OI clusters = resistance candidates.</li>
+    <li>Zero-volume/isolated strikes filter అవుతాయి. OI change మరియు traded volume wall నిజంగా activeగా ఉందా అని confirm చేస్తాయి.</li>
+    <li>Spot distance, ATR volatility మరియు neighbouring strike cluster strengthతో candidate score వస్తుంది.</li>
+    <li>Prediction date, strike, side మరియు features D1లో save అవుతాయి.</li>
+    <li>తర్వాతి trading sessionsలో price ఆ wallని touch చేసిందా, hold/bounce అయిందా లేదా break అయిందా test అవుతుంది.</li>
+    <li>కనీస sample count వచ్చిన తర్వాత అదే stock historical hold-rate/model calibration కొత్త levels rankingను adjust చేస్తుంది.</li>
+  </ol>
+
+  <h2>6. Correct next plan</h2>
+  <table>
+    <tr><th>Priority</th><th>Task</th><th>Expected result</th></tr>
+    <tr><td>P1</td><td>Imported 861 snapshots నుంచి daily support/resistance wall predictions build చేయడం.</td><td>ప్రతి stockకు historical OI wall record.</td></tr>
+    <tr><td>P1</td><td>FYERS six-month OHLCతో wallsను reached/held/brokeగా evaluate చేయడం.</td><td>Real measured success/failure samples.</td></tr>
+    <tr><td>P1</td><td>UIలో data coverage, sample count, hold-rate స్పష్టంగా చూపించడం.</td><td>Userకు confidence ఎందుకు వచ్చింది అనేది తెలుస్తుంది.</td></tr>
+    <tr><td>P2</td><td>Daily NSE EOD import automation.</td><td>Manual import అవసరం తగ్గుతుంది.</td></tr>
+    <tr><td>P2</td><td>అన్ని current NSE F&amp;O stocks selectable listలో add చేయడం.</td><td>7 stocks నుంచి full F&amp;O universeకు expansion.</td></tr>
+    <tr><td>P2</td><td>Walk-forward validation, leakage checks, hit-rate మరియు Brier score report.</td><td>Model performance నిజంగా stableనా తెలుసుకోవచ్చు.</td></tr>
+    <tr><td>P3</td><td>BSE/other official source adapter only where equivalent free derivatives OI is reliable.</td><td>Fallback source without silently mixing formats.</td></tr>
+  </table>
+
+  <h2>7. Important file paths</h2>
+  <table>
+    <tr><th>Purpose</th><th>Path (project root relative)</th></tr>
+    <tr><td>Main dashboard UI</td><td><code>app/OiDashboard.tsx</code></td></tr>
+    <tr><td>Market analysis API</td><td><code>app/api/market/chain/route.ts</code></td></tr>
+    <tr><td>FYERS callback/login</td><td><code>app/api/auth/fyers/callback/route.ts</code></td></tr>
+    <tr><td>Main OI model</td><td><code>lib/oi-model.ts</code></td></tr>
+    <tr><td>Historical storage/evaluation</td><td><code>lib/history-store.ts</code></td></tr>
+    <tr><td>Wall backtest logic</td><td><code>lib/wall-backtest.ts</code></td></tr>
+    <tr><td>Market data types</td><td><code>lib/market-types.ts</code></td></tr>
+    <tr><td>Database schema</td><td><code>db/schema.ts</code></td></tr>
+    <tr><td>NSE OI importer</td><td><code>scripts/backfill_history.py</code></td></tr>
+    <tr><td>Generated import file</td><td><code>nse_oi_backfill.sql</code> (local/generated; Git ignored)</td></tr>
+    <tr><td>Local D1 data</td><td><code>.wrangler/state/v3/d1</code> (local-only)</td></tr>
+    <tr><td>Model documentation</td><td><code>docs/model.md</code></td></tr>
+    <tr><td>Tests</td><td><code>tests/oi-model.test.ts</code>, <code>tests/wall-backtest.test.ts</code></td></tr>
+  </table>
+
+  <h2>8. Run/import commands</h2>
+  <p>Local site: <code>npm run dev</code></p>
+  <p>Prepare default seven-stock NSE OI file: <code>npm run import:nse-oi</code></p>
+  <p>Other NSE symbols example: <code>python scripts/backfill_history.py --symbols AXISBANK,MARUTI,LT --days 183</code></p>
+
+  <h2>9. Risks and safeguards</h2>
+  <ul>
+    <li>OI wall can move or disappear; therefore it is not a fixed guarantee.</li>
+    <li>Historical performance must be shown only from out-of-sample future candles, never using future data during declaration.</li>
+    <li>Different expiries must not be treated as one continuous contract.</li>
+    <li>Illiquid strikes and zero-volume OI need filtering, especially for stocks.</li>
+    <li>App ID, Secret ID, auth code and access token must never be placed in reports or source control.</li>
+  </ul>
+
+  <p class="small">This report describes the local project state verified on 31 August 2026. It is not financial advice.</p>
+</body>
+</html>

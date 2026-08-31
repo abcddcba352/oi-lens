@@ -38,3 +38,5 @@ next-env.d.ts
 /outputs/
 /work/
 *.tsbuildinfo
+__pycache__/
+nse_oi_backfill.sql

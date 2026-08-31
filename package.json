@@ -13,7 +13,11 @@
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "import:nse-oi": "python scripts/backfill_history.py --symbols ALL",
+    "update:nse-oi": "python scripts/backfill_history.py --symbols ALL --days 7 --output nse_oi_update.sql && npx wrangler d1 execute site-creator-d1 --config dist/server/wrangler.json --local --file nse_oi_update.sql",
+    "daily:update": "npm run update:nse-oi",
+    "setup:task": "powershell -ExecutionPolicy Bypass -File scripts/setup_task.ps1"
   },
   "dependencies": {
     "react": "19.2.6",

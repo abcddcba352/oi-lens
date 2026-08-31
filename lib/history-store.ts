@@ -1,9 +1,11 @@
 import { env } from 'cloudflare:workers';
-import { and, asc, eq, gte, lte, lt } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, lt, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
-import { instruments, levelOutcomes, marketSessions, oiSnapshots, oiStrikes } from '@/db/schema';
-import type { HistoricalLevelObservation, LevelFeatures, MarketSnapshot, PriceSession } from './market-types';
+import { instruments, levelOutcomes, marketSessions, oiSnapshots, oiStrikes, wallPredictions } from '@/db/schema';
+import type { HistoricalLevelObservation, LevelFeatures, LevelSide, MarketSnapshot, OiHistoryContext, OiHistorySnapshot, PriceSession } from './market-types';
 import type { MarketDataProvider } from './providers/types';
+import { HORIZON_SESSIONS, declarePrimaryWalls, evaluateFromHistory, aggregateWallStats, analyzeFeatureThresholds, tradingSessionsUntilExpiry } from './wall-backtest';
+import type { WallStats, FeatureThresholds } from './wall-backtest';
 
 const DAY = 86_400_000;
 
@@ -12,9 +14,27 @@ const SNAPSHOT_BUCKET_MINUTES = 15;
 // D1 has a conservative bound-parameter ceiling. A strike row can bind up to
 // eleven values, so small chunks keep every insert safely below that limit.
 const STRIKE_INSERT_CHUNK = 8;
+// Minimum calendar days after declaration before we attempt to evaluate an outcome.
+// 10 trading sessions ≈ 14 calendar days.
+const OI_CONTEXT_DAYS = 21;
+const OI_CONTEXT_MAX_SNAPSHOTS = 240;
 
 function dateOffset(date: string, days: number) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
+}
+
+function latestDailyPredictions<T extends { declaredDate: string; side: LevelSide; capturedAt: string }>(rows: T[]) {
+  const latest = new Map<string, T>();
+  for (const row of rows) {
+    const key = `${row.declaredDate}:${row.side}`;
+    const current = latest.get(key);
+    if (!current || row.capturedAt > current.capturedAt) latest.set(key, row);
+  }
+  return [...latest.values()];
+}
+
+function predictionHorizon(snapshot: MarketSnapshot) {
+  return tradingSessionsUntilExpiry(snapshot.asOf, snapshot.expiryEpoch, HORIZON_SESSIONS);
 }
 
 async function ensureInstrument(snapshot: MarketSnapshot) {
@@ -24,7 +44,11 @@ async function ensureInstrument(snapshot: MarketSnapshot) {
     .onConflictDoUpdate({ target: instruments.id, set: { displayName: snapshot.displayName, instrumentType: snapshot.instrumentType, strikeStep: snapshot.strikeStep, updatedAt: snapshot.asOf } });
 }
 
-export async function persistSnapshot(snapshot: MarketSnapshot) {
+/**
+ * Persist a live OI snapshot and its strikes.
+ * Returns the snapshotId string if stored, false if skipped (demo source).
+ */
+export async function persistSnapshot(snapshot: MarketSnapshot): Promise<string | false> {
   if (snapshot.source === 'demo') return false;
   await ensureInstrument(snapshot);
   const db = getDb();
@@ -38,7 +62,69 @@ export async function persistSnapshot(snapshot: MarketSnapshot) {
   for (let index = 0; index < values.length; index += STRIKE_INSERT_CHUNK) {
     await db.insert(oiStrikes).values(values.slice(index, index + STRIKE_INSERT_CHUNK)).onConflictDoNothing();
   }
-  return true;
+  return snapshotId;
+}
+
+/**
+ * Loads only snapshots captured before the current request and only for the
+ * selected expiry.  This prevents a weekly-expiry rollover from being mistaken
+ * for persistent OI and gives the intraday model genuine saved OI deltas.
+ */
+export async function loadOiHistoryContext(snapshot: MarketSnapshot): Promise<OiHistoryContext> {
+  const empty: OiHistoryContext = { intraday: [], positional: [] };
+  if (snapshot.source === 'demo') return empty;
+
+  const db = getDb();
+  const asOf = snapshot.asOf;
+  const start = `${dateOffset(asOf.slice(0, 10), -OI_CONTEXT_DAYS)}T00:00:00.000Z`;
+  const sessionStart = `${asOf.slice(0, 10)}T00:00:00.000Z`;
+  const expiryCondition = snapshot.expiryEpoch !== undefined
+    ? eq(oiSnapshots.expiryEpoch, snapshot.expiryEpoch)
+    : eq(oiSnapshots.expiry, snapshot.expiry);
+  const snapshotRows = await db
+    .select({ id: oiSnapshots.id, capturedAt: oiSnapshots.capturedAt, spot: oiSnapshots.spot })
+    .from(oiSnapshots)
+    .where(and(
+      eq(oiSnapshots.instrumentId, snapshot.symbol),
+      expiryCondition,
+      gte(oiSnapshots.capturedAt, start),
+      lt(oiSnapshots.capturedAt, asOf),
+    ))
+    .orderBy(desc(oiSnapshots.capturedAt))
+    .limit(OI_CONTEXT_MAX_SNAPSHOTS);
+  if (!snapshotRows.length) return empty;
+
+  // Query the strike rows in one batch rather than issuing one request per
+  // snapshot.  The capped snapshot count keeps this well inside D1 limits.
+  const ids = snapshotRows.map((row) => row.id);
+  const strikeRows = await db.select().from(oiStrikes).where(inArray(oiStrikes.snapshotId, ids));
+  const bySnapshot = new Map<string, OiHistorySnapshot>(
+    snapshotRows.map((row) => [row.id, { capturedAt: row.capturedAt, spot: row.spot, chain: [] }]),
+  );
+  for (const row of strikeRows) {
+    bySnapshot.get(row.snapshotId)?.chain.push({
+      strike: row.strike,
+      callOi: row.callOi,
+      callOiChange: row.callOiChange,
+      callVolume: row.callVolume,
+      callIv: row.callIv ?? undefined,
+      putOi: row.putOi,
+      putOiChange: row.putOiChange,
+      putVolume: row.putVolume,
+      putIv: row.putIv ?? undefined,
+    });
+  }
+
+  const positional = snapshotRows
+    .reverse()
+    .flatMap((row) => {
+      const item = bySnapshot.get(row.id);
+      return item?.chain.length ? [item] : [];
+    });
+  return {
+    intraday: positional.filter((item) => item.capturedAt >= sessionStart),
+    positional,
+  };
 }
 
 async function upsertSessions(symbol: string, sessions: PriceSession[]) {
@@ -102,5 +188,350 @@ export async function loadHistoricalObservations(symbol: string, asOf: string) {
     try {
       return [{ instrument: symbol, sessionDate: row.sessionDate, side: row.side, strike: row.strike, tested: row.tested, held: row.held, features: JSON.parse(row.featuresJson) as LevelFeatures }];
     } catch { return []; }
+  });
+}
+
+// ─── Wall prediction persistence ──────────────────────────────────────────────
+
+/**
+ * Declare and persist the strongest support and resistance wall for a snapshot.
+ * Idempotent — unique index on (snapshot_id, side) prevents duplicate rows.
+ *
+ * @param snapshot    The live market snapshot (chain + spot).
+ * @param snapshotId  The ID returned by persistSnapshot.
+ */
+export async function persistWallPredictions(snapshot: MarketSnapshot, snapshotId: string) {
+  if (snapshot.source === 'demo') return;
+  const walls = declarePrimaryWalls(snapshot, snapshotId);
+  const horizonSessions = predictionHorizon(snapshot);
+  if (horizonSessions < 1) return;
+  const db = getDb();
+  const insertions = [];
+
+  for (const side of ['support', 'resistance'] as const) {
+    const wall = walls[side];
+    if (!wall) continue;
+    const id = `${snapshot.symbol}:${snapshot.expiryEpoch ?? snapshot.expiry}:${wall.declaredDate}:${side}`;
+    const values = {
+      id,
+      instrumentId: snapshot.symbol,
+      snapshotId,
+      declaredDate: wall.declaredDate,
+      side,
+      strike: wall.strike,
+      spotAtDeclaration: wall.spot,
+      oiAtDeclaration: wall.oi,
+      oiChangeAtDeclaration: wall.oiChange,
+      clusterScore: wall.clusterScore,
+      atr14AtDeclaration: wall.atr14,
+      horizonSessions,
+    };
+    insertions.push(
+      db.insert(wallPredictions).values(values).onConflictDoUpdate({
+        target: wallPredictions.id,
+        set: {
+          snapshotId: values.snapshotId,
+          strike: values.strike,
+          spotAtDeclaration: values.spotAtDeclaration,
+          oiAtDeclaration: values.oiAtDeclaration,
+          oiChangeAtDeclaration: values.oiChangeAtDeclaration,
+          clusterScore: values.clusterScore,
+          atr14AtDeclaration: values.atr14AtDeclaration,
+          horizonSessions: values.horizonSessions,
+        },
+      }),
+    );
+  }
+
+  await Promise.all(insertions);
+}
+
+// ─── Backfill evaluation ──────────────────────────────────────────────────────
+
+/**
+ * For every unevaluated wall prediction (evaluatedAt IS NULL) that is old enough
+ * to have sufficient future candles in priceHistory, compute and write the outcome.
+ *
+ * Processes at most 50 rows per call to stay within D1 write limits.
+ * Safe to call on every request — idempotent for already-evaluated rows.
+ *
+ * @param symbol        Instrument symbol.
+ * @param priceHistory  All daily sessions already loaded into memory (6 months).
+ */
+export async function evaluatePendingWalls(symbol: string, priceHistory: PriceSession[]) {
+  const db = getDb();
+  const today = priceHistory.at(-1)?.date;
+  if (!today) return;
+
+  const pending = await db
+    .select()
+    .from(wallPredictions)
+    .where(
+      and(
+        eq(wallPredictions.instrumentId, symbol),
+        isNull(wallPredictions.evaluatedAt),
+        lt(wallPredictions.declaredDate, today),
+      ),
+    )
+    .orderBy(asc(wallPredictions.declaredDate))
+    .limit(50);
+
+  if (!pending.length) return;
+
+  const now = new Date().toISOString();
+
+  for (const row of pending) {
+    const outcome = evaluateFromHistory(
+      priceHistory,
+      row.declaredDate,
+      row.strike,
+      row.side,
+      row.atr14AtDeclaration,
+      row.horizonSessions,
+    );
+    if (!outcome) continue; // not enough future sessions yet; skip
+
+    await db
+      .update(wallPredictions)
+      .set({
+        evaluatedAt: now,
+        reached: outcome.reached,
+        daysToReach: outcome.daysToReach,
+        held: outcome.held,
+        bouncePoints: outcome.bouncePoints,
+        bounceAtr: outcome.bounceAtr,
+        broke: outcome.broke,
+      })
+      .where(eq(wallPredictions.id, row.id));
+  }
+}
+
+// ─── Load aggregated stats for UI ─────────────────────────────────────────────
+
+export interface WallStatsResult {
+  support: WallStats;
+  resistance: WallStats;
+}
+
+/**
+ * Load evaluated wall predictions for an instrument from the last `lookbackDays`
+ * calendar days and return aggregated statistics per side for display in the UI.
+ *
+ * @param symbol        Instrument symbol.
+ * @param lookbackDays  How far back to aggregate (default 183 = 6 months).
+ */
+export async function loadWallStats(symbol: string, lookbackDays = 183): Promise<WallStatsResult> {
+  const db = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = dateOffset(today, -lookbackDays);
+
+  const rows = await db
+    .select({
+      declaredDate: wallPredictions.declaredDate,
+      side: wallPredictions.side,
+      capturedAt: oiSnapshots.capturedAt,
+      reached: wallPredictions.reached,
+      daysToReach: wallPredictions.daysToReach,
+      held: wallPredictions.held,
+      broke: wallPredictions.broke,
+      bouncePoints: wallPredictions.bouncePoints,
+      bounceAtr: wallPredictions.bounceAtr,
+    })
+    .from(wallPredictions)
+    .innerJoin(oiSnapshots, eq(wallPredictions.snapshotId, oiSnapshots.id))
+    .where(
+      and(
+        eq(wallPredictions.instrumentId, symbol),
+        gte(wallPredictions.declaredDate, startDate),
+        sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+      ),
+    );
+
+  const dailyRows = latestDailyPredictions(rows);
+  const supportRows = dailyRows.filter((r) => r.side === 'support');
+  const resistanceRows = dailyRows.filter((r) => r.side === 'resistance');
+
+  return {
+    support: aggregateWallStats(supportRows),
+    resistance: aggregateWallStats(resistanceRows),
+  };
+}
+
+/**
+ * Load evaluated wall predictions as training observations for model calibration.
+ */
+export async function loadWallTrainingObservations(
+  symbol: string,
+  lookbackDays = 183,
+): Promise<HistoricalLevelObservation[]> {
+  const db = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = dateOffset(today, -lookbackDays);
+
+  const rows = await db
+    .select({
+      declaredDate: wallPredictions.declaredDate,
+      side: wallPredictions.side,
+      capturedAt: oiSnapshots.capturedAt,
+      reached: wallPredictions.reached,
+      held: wallPredictions.held,
+      oiChangeAtDeclaration: wallPredictions.oiChangeAtDeclaration,
+      oiAtDeclaration: wallPredictions.oiAtDeclaration,
+      spotAtDeclaration: wallPredictions.spotAtDeclaration,
+      strike: wallPredictions.strike,
+      atr14AtDeclaration: wallPredictions.atr14AtDeclaration,
+      clusterScore: wallPredictions.clusterScore,
+      callVolume: oiStrikes.callVolume,
+      putVolume: oiStrikes.putVolume,
+    })
+    .from(wallPredictions)
+    .innerJoin(oiSnapshots, eq(wallPredictions.snapshotId, oiSnapshots.id))
+    .innerJoin(
+      oiStrikes,
+      and(
+        eq(oiStrikes.snapshotId, wallPredictions.snapshotId),
+        eq(oiStrikes.strike, wallPredictions.strike),
+      ),
+    )
+    .where(
+      and(
+        eq(wallPredictions.instrumentId, symbol),
+        gte(wallPredictions.declaredDate, startDate),
+        sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+      ),
+    );
+
+  return latestDailyPredictions(rows).flatMap<HistoricalLevelObservation>((row) => {
+    if (row.reached !== true || row.held === null) return [];
+
+    const oiChangeNormalized = Math.tanh(row.oiChangeAtDeclaration / Math.max(1, row.oiAtDeclaration * 0.2));
+    const proximity = Math.exp(-Math.abs(row.spotAtDeclaration - row.strike) / Math.max(row.atr14AtDeclaration, 100));
+    const optionVolume = row.side === 'support' ? row.putVolume : row.callVolume;
+    const volumeConfirmation = Math.min(
+      1,
+      Math.max(0, Math.log1p(optionVolume) / Math.max(1, Math.log1p(row.oiAtDeclaration * 2))),
+    );
+
+    const features: LevelFeatures = {
+      clusterOi: Math.min(1, Math.max(0, row.clusterScore)),
+      oiChange: Math.min(1, Math.max(-1, oiChangeNormalized)),
+      volumeConfirmation,
+      proximity: Math.min(1, Math.max(0, proximity)),
+      persistence: 0.5,
+      regimeFit: 0.6,
+    };
+
+    return [
+      {
+        instrument: symbol,
+        sessionDate: row.declaredDate,
+        side: row.side as LevelSide,
+        strike: row.strike,
+        tested: true,
+        held: Boolean(row.held),
+        features,
+      },
+    ];
+  });
+}
+
+/**
+ * Load empirical feature thresholds breakdown (hold rates by fresh OI vs unwinding, cluster thickness).
+ */
+export async function loadFeatureThresholds(
+  symbol: string,
+  lookbackDays = 183,
+): Promise<FeatureThresholds> {
+  const db = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = dateOffset(today, -lookbackDays);
+
+  const rows = await db
+    .select({
+      declaredDate: wallPredictions.declaredDate,
+      side: wallPredictions.side,
+      capturedAt: oiSnapshots.capturedAt,
+      oiChangeAtDeclaration: wallPredictions.oiChangeAtDeclaration,
+      clusterScore: wallPredictions.clusterScore,
+      reached: wallPredictions.reached,
+      held: wallPredictions.held,
+    })
+    .from(wallPredictions)
+    .innerJoin(oiSnapshots, eq(wallPredictions.snapshotId, oiSnapshots.id))
+    .where(
+      and(
+        eq(wallPredictions.instrumentId, symbol),
+        gte(wallPredictions.declaredDate, startDate),
+        sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+      ),
+    );
+
+  return analyzeFeatureThresholds(latestDailyPredictions(rows));
+}
+// ─── Quarterly walk-forward validation ────────────────────────────────────────
+
+export interface QuarterStats {
+  /** e.g. "Q2 2026" */
+  label: string;
+  support: WallStats;
+  resistance: WallStats;
+}
+
+/**
+ * Groups evaluated wall predictions into calendar quarters and returns
+ * aggregated stats per quarter, ordered oldest first.
+ * Used for walk-forward validation — each quarter is an independent out-of-sample window.
+ */
+export async function loadWallStatsByQuarter(symbol: string): Promise<QuarterStats[]> {
+  const db = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = dateOffset(today, -183);
+
+  const rows = await db
+    .select({
+      declaredDate: wallPredictions.declaredDate,
+      side: wallPredictions.side,
+      capturedAt: oiSnapshots.capturedAt,
+      reached: wallPredictions.reached,
+      daysToReach: wallPredictions.daysToReach,
+      held: wallPredictions.held,
+      broke: wallPredictions.broke,
+      bouncePoints: wallPredictions.bouncePoints,
+      bounceAtr: wallPredictions.bounceAtr,
+    })
+    .from(wallPredictions)
+    .innerJoin(oiSnapshots, eq(wallPredictions.snapshotId, oiSnapshots.id))
+    .where(
+      and(
+        eq(wallPredictions.instrumentId, symbol),
+        gte(wallPredictions.declaredDate, startDate),
+        sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+      ),
+    )
+    .orderBy(asc(wallPredictions.declaredDate));
+
+  const daily = latestDailyPredictions(rows);
+
+  // Group by calendar quarter: "2026-Q1", "2026-Q2", etc.
+  const byQuarter = new Map<string, { support: typeof daily; resistance: typeof daily }>();
+  for (const row of daily) {
+    const d = new Date(row.declaredDate);
+    const q = Math.ceil((d.getUTCMonth() + 1) / 3);
+    const key = `${d.getUTCFullYear()}-Q${q}`;
+    if (!byQuarter.has(key)) byQuarter.set(key, { support: [], resistance: [] });
+    const bucket = byQuarter.get(key)!;
+    if (row.side === 'support') bucket.support.push(row);
+    else bucket.resistance.push(row);
+  }
+
+  return [...byQuarter.entries()].map(([key, bucket]) => {
+    const [year, q] = key.split('-');
+    const quarterNames = ['', 'Jan–Mar', 'Apr–Jun', 'Jul–Sep', 'Oct–Dec'];
+    const qNum = parseInt(q.replace('Q', ''), 10);
+    return {
+      label: `${quarterNames[qNum]} ${year}`,
+      support: aggregateWallStats(bucket.support),
+      resistance: aggregateWallStats(bucket.resistance),
+    };
   });
 }

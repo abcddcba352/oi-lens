@@ -24,7 +24,7 @@ export interface MarketSnapshot {
   atr14: number;
   ivPercentile: number;
   asOf: string;
-  source: 'fyers' | 'demo';
+  source: 'fyers' | 'demo' | 'nse-bhavcopy';
   chain: ChainStrike[];
 }
 
@@ -75,14 +75,67 @@ export interface LevelSignal {
   distancePoints: number;
   distancePercent: number;
   score: number;
-  probability: number;
+  /**
+   * Only populated when a model has been empirically calibrated.  Live and
+   * price-zone analyses deliberately expose a strength score instead: a
+   * candidate wall is not a guaranteed probability of a future reaction.
+   */
+  probability: number | null;
   oi: number;
   oiChange: number;
   features: LevelFeatures;
+  zoneLow?: number;
+  zoneHigh?: number;
+  invalidation?: number;
+  historicalTests?: number;
+  historicalHoldRate?: number | null;
+  oiHistorySnapshots?: number;
+}
+
+export type AnalysisHorizon = 'intraday' | 'positional';
+
+/** A previously saved option-chain snapshot. It is used on the server only. */
+export interface OiHistorySnapshot {
+  capturedAt: string;
+  spot: number;
+  chain: ChainStrike[];
+}
+
+/**
+ * Same-expiry OI evidence accumulated by this application.  Intraday and
+ * positional windows remain separate so a weekly-expiry rollover is never
+ * silently treated as persistence in the same contract.
+ */
+export interface OiHistoryContext {
+  intraday: OiHistorySnapshot[];
+  positional: OiHistorySnapshot[];
+}
+
+export interface TimeframeAnalysis {
+  horizon: AnalysisHorizon;
+  label: string;
+  horizonLabel: string;
+  levels: LevelSignal[];
+  primarySupport: LevelSignal | null;
+  primaryResistance: LevelSignal | null;
+  rangePosition: number | null;
+  zoneWidth: number;
+  invalidationDistance: number;
+  oiHistorySnapshots: number;
+  historicalTests: number;
+  historicalHoldRate: number | null;
+  note: string;
 }
 
 export interface MarketAnalysis {
   snapshot: MarketSnapshot;
+  /**
+   * The two views intentionally use different evidence and time horizons.
+   * `levels` and the primary fields below remain aliases of `positional` for
+   * backward compatibility with existing callers.
+   */
+  intraday: TimeframeAnalysis;
+  positional: TimeframeAnalysis;
   levels: LevelSignal[];
   primarySupport: LevelSignal | null;
   primaryResistance: LevelSignal | null;

@@ -4,6 +4,10 @@ const CREDENTIALS_COOKIE = 'oi_fyers_credentials';
 const FIFTEEN_MINUTES = 15 * 60;
 const ONE_DAY = 24 * 60 * 60;
 const THIRTY_DAYS = 30 * ONE_DAY;
+// Local development can operate without configuration, but its encrypted
+// cookies intentionally expire whenever the server restarts. Set
+// OI_COOKIE_SECRET to a long random value to retain them across restarts.
+const EPHEMERAL_COOKIE_SECRET = randomBase64Url(32);
 
 interface FyersCredentials {
   appId: string;
@@ -92,7 +96,7 @@ export async function exchangeFyersAuthCode(request: Request, code: string) {
   }
   return sealValue(
     { accessToken: payload.access_token, refreshToken: payload.refresh_token, connectedAt: new Date().toISOString() },
-    await sessionKey(credentials.secretId),
+    await sessionKey(request, credentials.secretId),
   );
 }
 
@@ -101,7 +105,7 @@ export async function readFyersAuthorization(request: Request) {
   const credentials = await readFyersCredentials(request);
   if (!sealed || !credentials) return null;
   try {
-    const session = await openValue<FyersSession>(sealed, await sessionKey(credentials.secretId));
+    const session = await openValue<FyersSession>(sealed, await sessionKey(request, credentials.secretId));
     return `${credentials.appId}:${session.accessToken}`;
   } catch {
     return null;
@@ -175,11 +179,16 @@ async function openValue<T>(value: string, key: CryptoKey): Promise<T> {
 
 async function credentialKey(request: Request) {
   const userId = request.headers.get('oai-authenticated-user-id') || 'oi-lens-local-user';
-  return aesKey(`${userId}:oi-lens-fyers-credentials`);
+  return aesKey(`${cookieSecret()}:${userId}:oi-lens-fyers-credentials`);
 }
 
-async function sessionKey(secretId: string) {
-  return aesKey(`${secretId}:oi-lens-session`);
+async function sessionKey(request: Request, secretId: string) {
+  const userId = request.headers.get('oai-authenticated-user-id') || 'oi-lens-local-user';
+  return aesKey(`${cookieSecret()}:${userId}:${secretId}:oi-lens-session`);
+}
+
+function cookieSecret() {
+  return process.env.OI_COOKIE_SECRET?.trim() || EPHEMERAL_COOKIE_SECRET;
 }
 
 async function aesKey(material: string) {

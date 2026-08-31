@@ -29,6 +29,34 @@ export const levelOutcomes = sqliteTable('level_outcomes', {
   horizonSessions: integer('horizon_sessions').notNull().default(3),
 }, (table) => [index('level_outcomes_instrument_date_idx').on(table.instrumentId, table.sessionDate), index('level_outcomes_side_tested_idx').on(table.side, table.tested)]);
 
+export const wallPredictions = sqliteTable('wall_predictions', {
+  id: text('id').primaryKey(),
+  instrumentId: text('instrument_id').notNull().references(() => instruments.id),
+  snapshotId: text('snapshot_id').notNull().references(() => oiSnapshots.id),
+  declaredDate: text('declared_date').notNull(),
+  side: text('side', { enum: ['support', 'resistance'] }).notNull(),
+  strike: real('strike').notNull(),
+  spotAtDeclaration: real('spot_at_declaration').notNull(),
+  oiAtDeclaration: integer('oi_at_declaration').notNull(),
+  oiChangeAtDeclaration: integer('oi_change_at_declaration').notNull(),
+  clusterScore: real('cluster_score').notNull(),
+  atr14AtDeclaration: real('atr14_at_declaration').notNull(),
+  // Outcome fields — filled in by evaluatePendingWalls
+  evaluatedAt: text('evaluated_at'),
+  horizonSessions: integer('horizon_sessions').notNull().default(10),
+  reached: integer('reached', { mode: 'boolean' }),
+  daysToReach: integer('days_to_reach'),
+  held: integer('held', { mode: 'boolean' }),
+  bouncePoints: real('bounce_points'),
+  bounceAtr: real('bounce_atr'),
+  broke: integer('broke', { mode: 'boolean' }),
+}, (table) => [
+  uniqueIndex('wall_predictions_snapshot_side_unique').on(table.snapshotId, table.side),
+  index('wall_predictions_instrument_date_idx').on(table.instrumentId, table.declaredDate),
+  index('wall_predictions_instrument_side_idx').on(table.instrumentId, table.side),
+  index('wall_predictions_evaluated_idx').on(table.evaluatedAt),
+]);
+
 export const modelCalibrations = sqliteTable('model_calibrations', {
   id: text('id').primaryKey(), instrumentId: text('instrument_id').notNull().references(() => instruments.id), trainedAt: text('trained_at').notNull(),
   lookbackStart: text('lookback_start').notNull(), lookbackEnd: text('lookback_end').notNull(), samples: integer('samples').notNull(), validationSamples: integer('validation_samples').notNull(),
