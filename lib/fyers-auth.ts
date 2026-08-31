@@ -7,7 +7,7 @@ const THIRTY_DAYS = 30 * ONE_DAY;
 // Local development can operate without configuration, but its encrypted
 // cookies intentionally expire whenever the server restarts. Set
 // OI_COOKIE_SECRET to a long random value to retain them across restarts.
-const EPHEMERAL_COOKIE_SECRET = randomBase64Url(32);
+let EPHEMERAL_COOKIE_SECRET: string | undefined;
 
 interface FyersCredentials {
   appId: string;
@@ -29,13 +29,13 @@ interface FyersSession {
 }
 
 function environmentCredentials(): FyersCredentials | null {
-  const appId = process.env.FYERS_APP_ID?.trim();
-  const secretId = process.env.FYERS_SECRET_ID?.trim();
+  const appId = globalThis.process?.env?.FYERS_APP_ID?.trim();
+  const secretId = globalThis.process?.env?.FYERS_SECRET_ID?.trim();
   return appId && secretId ? { appId, secretId } : null;
 }
 
 function apiBase() {
-  return process.env.FYERS_API_BASE?.trim() || 'https://api-t1.fyers.in';
+  return globalThis.process?.env?.FYERS_API_BASE?.trim() || 'https://api-t1.fyers.in';
 }
 
 export async function readFyersCredentials(request: Request): Promise<FyersCredentials | null> {
@@ -55,9 +55,9 @@ export async function fyersIsConfigured(request: Request) {
 }
 
 export function fyersRedirectUri(request: Request) {
-  const explicit = process.env.FYERS_REDIRECT_URI?.trim();
+  const explicit = globalThis.process?.env?.FYERS_REDIRECT_URI?.trim();
   if (explicit) return explicit;
-  const siteUrl = process.env.SITE_URL?.trim();
+  const siteUrl = globalThis.process?.env?.SITE_URL?.trim();
   return new URL('/api/auth/fyers/callback', siteUrl || request.url).toString();
 }
 
@@ -151,7 +151,7 @@ function readCookie(request: Request, name: string) {
 }
 
 function serializeCookie(name: string, value: string, request: Request, maxAge: number) {
-  const secure = new URL(request.url).protocol === 'https:' || process.env.NODE_ENV === 'production';
+  const secure = new URL(request.url).protocol === 'https:' || globalThis.process?.env?.NODE_ENV === 'production';
   return `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${maxAge}; SameSite=Lax${secure ? '; Secure' : ''}; HttpOnly`;
 }
 
@@ -188,7 +188,8 @@ async function sessionKey(request: Request, secretId: string) {
 }
 
 function cookieSecret() {
-  return process.env.OI_COOKIE_SECRET?.trim() || EPHEMERAL_COOKIE_SECRET;
+  if (!EPHEMERAL_COOKIE_SECRET) EPHEMERAL_COOKIE_SECRET = randomBase64Url(32);
+  return globalThis.process?.env?.OI_COOKIE_SECRET?.trim() || EPHEMERAL_COOKIE_SECRET;
 }
 
 async function aesKey(material: string) {
