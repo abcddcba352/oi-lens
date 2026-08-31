@@ -79,8 +79,27 @@ export class FyersProvider implements MarketDataProvider {
 
     const rows = payload.data.optionsChain;
     const underlying = rows.find((row) => row.strike_price === -1);
-    const spot = underlying?.ltp;
-    if (!spot || !Number.isFinite(spot)) throw new Error('FYERS response did not contain the underlying price.');
+    let spot = underlying?.ltp;
+    let spotChange = underlying?.chp;
+
+    if (!spot || !Number.isFinite(spot)) {
+      try {
+        const quoteUrl = new URL('/data/quotes', this.baseUrl);
+        quoteUrl.searchParams.set('symbols', request.symbol);
+        const quoteResponse = await fetch(quoteUrl, {
+          headers: { Authorization: this.token, Accept: 'application/json', 'User-Agent': 'OI-Lens/1.0 FYERS-API-Client' },
+          signal: AbortSignal.timeout(5_000),
+        });
+        const quoteBody = await quoteResponse.text();
+        const quotePayload = JSON.parse(quoteBody) as { d?: Array<{ v?: { lp?: number; chp?: number } }> };
+        spot = quotePayload.d?.[0]?.v?.lp;
+        spotChange = quotePayload.d?.[0]?.v?.chp;
+      } catch (e) {
+        console.warn('FYERS quotes fallback failed:', e);
+      }
+    }
+
+    if (!spot || !Number.isFinite(spot)) throw new Error('FYERS response did not contain the underlying price. Ensure the market is open or check the symbol.');
     const byStrike = new Map<number, ChainStrike>();
     for (const row of rows) {
       if (row.strike_price <= 0 || !row.option_type) continue;
@@ -117,7 +136,7 @@ export class FyersProvider implements MarketDataProvider {
       displayName: known?.displayName ?? request.symbol.replace(/^NSE:|-(EQ|INDEX)$/g, ''),
       instrumentType: known?.instrumentType ?? 'stock',
       spot,
-      spotChangePercent: underlying?.chp ?? 0,
+      spotChangePercent: spotChange ?? 0,
       expiry: expiry?.date ?? 'Nearest expiry',
       expiryEpoch: expiry?.expiry,
       strikeStep: known?.step ?? inferredStep,
