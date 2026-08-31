@@ -1,0 +1,21 @@
+{
+  "name": "oi-lens",
+  "main": "dist/server/index.js",
+  "compatibility_date": "2024-05-15",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "dist/client"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "site-creator-d1",
+      "database_id": "c87eb6e7-c4d3-4a10-baf8-23ae4413d2c7"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
