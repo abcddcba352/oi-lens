@@ -1,7 +1,7 @@
 {
   "name": "oi-lens",
   "main": "dist/server/index.js",
-  "compatibility_date": "2024-05-15",
+  "compatibility_date": "2024-09-23",
   "compatibility_flags": [
     "nodejs_compat"
   ],
