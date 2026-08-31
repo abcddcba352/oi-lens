@@ -8,13 +8,6 @@
   "assets": {
     "directory": "dist/client"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "site-creator-d1",
-      "database_id": "c87eb6e7-c4d3-4a10-baf8-23ae4413d2c7"
-    }
-  ],
   "observability": {
     "enabled": true
   }
