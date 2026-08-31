@@ -61,7 +61,6 @@ export class FyersProvider implements MarketDataProvider {
     try {
       response = await fetch(url, {
         headers: { Authorization: this.token, Accept: 'application/json', 'User-Agent': 'OI-Lens/1.0 FYERS-API-Client' },
-        cache: 'no-store',
         signal: controller.signal,
       });
     } finally {
@@ -141,7 +140,6 @@ export class FyersProvider implements MarketDataProvider {
     url.searchParams.set('cont_flag', '0');
     const response = await fetch(url, {
       headers: { Authorization: this.token, Accept: 'application/json', 'User-Agent': 'OI-Lens/1.0 FYERS-API-Client' },
-      cache: 'no-store',
       signal: AbortSignal.timeout(10_000),
     });
     const body = await response.text();
