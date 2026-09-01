@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Activity, ArrowDownRight, ArrowUpRight, Eye, EyeOff, History, LogOut, PlugZap, RefreshCw, Search, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -222,6 +222,92 @@ interface ChainPayload {
   error?: string;
 }
 
+function SymbolSearch({
+  value,
+  onChange,
+  onSelect,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (sym: string) => void;
+}) {
+  const [query, setQuery] = useState(value);
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Keep input in sync when symbol changes externally (e.g. initial load)
+  useEffect(() => { setQuery(value); }, [value]);
+
+  const q = query.trim().toUpperCase();
+  const filtered = q.length === 0 ? [] : instruments.filter(
+    ([sym, label]) => label.includes(q) || sym.includes(q)
+  ).slice(0, 12);
+
+  function pick(sym: string, label: string) {
+    setQuery(label);
+    onChange(sym);
+    onSelect(sym);
+    setOpen(false);
+  }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative grid gap-1.5">
+      <label htmlFor="instrument-symbol" className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Any index or F&amp;O stock</label>
+      <div className="flex gap-2">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="instrument-symbol"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value.toUpperCase()); setOpen(true); onChange(e.target.value.toUpperCase()); }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (filtered.length > 0) { pick(filtered[0][0], filtered[0][1]); }
+                else { onSelect(query); setOpen(false); }
+              }
+              if (e.key === 'Escape') setOpen(false);
+            }}
+            className="h-10 pl-9 font-mono text-sm font-bold uppercase"
+            placeholder="Type TCS, SBIN, NIFTY…"
+            autoComplete="off"
+          />
+          {open && filtered.length > 0 && (
+            <ul className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-card shadow-xl">
+              {filtered.map(([sym, label]) => (
+                <li key={sym}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                    onMouseDown={(e) => { e.preventDefault(); pick(sym, label); }}
+                  >
+                    <span className="font-bold">{label}</span>
+                    <span className="ml-auto font-mono text-[11px] text-muted-foreground">{sym.replace('NSE:', '').replace(/-(EQ|INDEX)$/, '')}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <Button type="button" size="lg" onClick={() => onSelect(query)}>
+          <Search data-icon="inline-start" />Analyze
+        </Button>
+      </div>
+      <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Type a ticker like TCS, SBIN, M&amp;M — click or press Enter to load.</span>
+    </div>
+  );
+}
+
 export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [analysis, setAnalysis] = useState<DashboardAnalysis>(initial);
   const [symbol, setSymbol] = useState(initial.snapshot.symbol);
@@ -285,14 +371,17 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       setDataStatus(payload.dataStatus ?? null);
       setWallStats(payload.wallStats ?? null);
       setQuarterStats(payload.quarterStats ?? []);
+      // Auto-trigger backfill when the symbol has no historical tests yet
+      const tests = payload.analysis.positional?.historicalTests ?? 0;
+      if (tests === 0 && payload.analysis.snapshot.source !== 'demo') {
+        void runBackfillFor(normalized);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to refresh.');
     } finally { setLoading(false); }
   }
 
-  async function runBackfill() {
-    const normalized = normalizeSymbol(symbol);
-    if (!normalized) return;
+  async function runBackfillFor(sym: string) {
     setBackfillState({ running: true, processed: 0, total: 0 });
     setError(null);
     try {
@@ -300,7 +389,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       const limit = 50;
       while (true) {
         const response = await fetch(
-          `/api/market/chain?symbol=${encodeURIComponent(normalized)}&backfill=true&offset=${offset}&limit=${limit}`,
+          `/api/market/chain?symbol=${encodeURIComponent(sym)}&backfill=true&offset=${offset}&limit=${limit}`,
           { cache: 'no-store' },
         );
         const payload = await response.json() as { success?: boolean; processed?: number; remaining?: number; total?: number; error?: string };
@@ -312,11 +401,17 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         offset = processed;
       }
       // Reload to show updated wall stats.
-      await load(normalized);
+      await load(sym);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Backfill failed.');
       setBackfillState((prev) => prev ? { ...prev, running: false } : null);
     }
+  }
+
+  async function runBackfill() {
+    const normalized = normalizeSymbol(symbol);
+    if (!normalized) return;
+    await runBackfillFor(normalized);
   }
 
   async function disconnectFyers() {
@@ -393,7 +488,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         {error && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error}</div>}
         <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">
           <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Two-horizon level map</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Intraday OI and positional support/resistance</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">The intraday map reads live positioning strength. The positional map combines current OI with six months of daily price-zone behaviour. They are kept separate so daily history is never presented as intraday proof.</p></div>
-          <form className="grid gap-1.5" onSubmit={(event) => { event.preventDefault(); void load(); }}><label htmlFor="instrument-symbol" className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Any index or F&amp;O stock</label><div className="flex gap-2"><Input id="instrument-symbol" list="fyers-instruments" value={symbol} onChange={(event) => setSymbol(event.target.value.toUpperCase())} className="h-10 min-w-0 font-mono text-sm font-bold uppercase" placeholder="TCS or NSE:TCS-EQ" autoComplete="off" aria-describedby="instrument-help" /><Button type="submit" size="lg" disabled={loading}><Search data-icon="inline-start" />Analyze</Button></div><datalist id="fyers-instruments">{instruments.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</datalist><span id="instrument-help" className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Type a ticker like TCS, SBIN, M&amp;M, or the full FYERS symbol.</span></form>
+          <SymbolSearch
+            value={symbol}
+            onChange={setSymbol}
+            onSelect={(sym) => { setSymbol(sym); void load(sym); }}
+          />
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Expiry<select className="h-10 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground" aria-label="Expiry"><option>{snapshot.expiry}</option></select></label>
         </section>
 
