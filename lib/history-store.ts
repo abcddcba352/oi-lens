@@ -176,6 +176,32 @@ export interface HistoryCacheResult {
   latestSession: string | null;
 }
 
+/** Load only same-instrument sessions already stored in D1. Historical wall
+ * repair must never substitute demo/index-shaped prices for a stock. */
+export async function loadCachedPriceHistory(
+  symbol: string,
+  asOf: string,
+): Promise<HistoryCacheResult | null> {
+  const end = asOf.slice(0, 10);
+  const start = dateOffset(end, -183);
+  const rows = await getDb().select().from(marketSessions)
+    .where(and(
+      eq(marketSessions.instrumentId, symbol),
+      gte(marketSessions.sessionDate, start),
+      lte(marketSessions.sessionDate, end),
+    ))
+    .orderBy(asc(marketSessions.sessionDate));
+  if (rows.length < 20) return null;
+  const history = rows.map((row) => ({
+    date: row.sessionDate,
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+  }));
+  return { history, source: 'cache', latestSession: history.at(-1)?.date ?? null };
+}
+
 export async function loadOrRefreshPriceHistory(
   provider: MarketDataProvider,
   snapshot: MarketSnapshot,

@@ -5,6 +5,7 @@ import {
   evaluatePendingWalls,
   loadFeatureThresholds,
   loadHistoricalObservations,
+  loadCachedPriceHistory,
   loadOiCoverage,
   loadOiHistoryContext,
   loadOrRefreshPriceHistory,
@@ -115,7 +116,12 @@ export async function GET(request: Request) {
         source: provider.id,
         chain: [],
       };
-      const cached = await loadOrRefreshPriceHistory(provider, dummySnapshot);
+      const cached = provider.id === 'demo'
+        ? await loadCachedPriceHistory(symbol, dummySnapshot.asOf)
+        : await loadOrRefreshPriceHistory(provider, dummySnapshot);
+      if (!cached) {
+        throw new Error('Connect FYERS once to cache this instrument\'s daily history before backfilling OI walls.');
+      }
       await evaluatePendingWalls(symbol, cached.history);
 
       const processed = offset + declaredCount;
