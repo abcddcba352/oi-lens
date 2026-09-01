@@ -19,6 +19,12 @@ const STRIKE_INSERT_CHUNK = 8;
 const OI_CONTEXT_DAYS = 21;
 const OI_CONTEXT_MAX_SNAPSHOTS = 240;
 
+export interface OiCoverage {
+  snapshots: number;
+  firstSnapshot: string | null;
+  latestSnapshot: string | null;
+}
+
 function dateOffset(date: string, days: number) {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
@@ -124,6 +130,25 @@ export async function loadOiHistoryContext(snapshot: MarketSnapshot): Promise<Oi
   return {
     intraday: positional.filter((item) => item.capturedAt >= sessionStart),
     positional,
+  };
+}
+
+/** Return saved OI coverage for one instrument, used to decide whether a
+ * historical wall backfill is possible and to explain empty UI states. */
+export async function loadOiCoverage(symbol: string): Promise<OiCoverage> {
+  const rows = await getDb()
+    .select({
+      snapshots: sql<number>`count(*)`,
+      firstSnapshot: sql<string | null>`min(${oiSnapshots.capturedAt})`,
+      latestSnapshot: sql<string | null>`max(${oiSnapshots.capturedAt})`,
+    })
+    .from(oiSnapshots)
+    .where(eq(oiSnapshots.instrumentId, symbol));
+  const row = rows[0];
+  return {
+    snapshots: Number(row?.snapshots ?? 0),
+    firstSnapshot: row?.firstSnapshot ?? null,
+    latestSnapshot: row?.latestSnapshot ?? null,
   };
 }
 

@@ -6,9 +6,10 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
+    "dev": "npm run build && wrangler dev --config dist/server/wrangler.json --port 3000 --persist-to .wrangler/state",
+    "dev:hot": "vinext dev",
     "build": "vinext build",
-    "start": "wrangler dev --config dist/server/wrangler.json",
+    "start": "wrangler dev --config dist/server/wrangler.json --port 3000 --persist-to .wrangler/state",
     "lint": "oxlint app lib db",
     "format": "oxfmt",
     "db:generate": "drizzle-kit generate",

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.SITE_URL ?? 'http://localhost:3001'),
+  metadataBase: new URL(process.env.SITE_URL ?? 'http://localhost:3000'),
   title: 'OI Lens — Six-Month Calibrated Options Levels',
   description: 'Instrument-specific support and resistance from live options OI and six months of walk-forward historical validation.',
   openGraph: {

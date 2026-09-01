@@ -197,6 +197,9 @@ const instruments = [
   ['NSE:ZYDUSLIFE-EQ', 'ZYDUSLIFE'],
 ] as const;
 
+type InstrumentOption = readonly [symbol: string, label: string];
+const indexFallback: InstrumentOption[] = instruments.slice(0, 4).map(([symbol, label]) => [symbol, label]);
+
 interface DataStatus {
   historySource: 'backfilled' | 'incremental' | 'cache';
   historySessions: number;
@@ -204,6 +207,9 @@ interface DataStatus {
   oiSnapshotStored: boolean;
   oiSnapshotWarning: string | null;
   oiSnapshotIntervalMinutes: number;
+  storedOiSnapshots: number;
+  earliestOiSnapshot: string | null;
+  latestOiSnapshot: string | null;
 }
 
 type DashboardAnalysis = MarketAnalysis & { featureThresholds?: FeatureThresholds };
@@ -222,32 +228,33 @@ interface ChainPayload {
   error?: string;
 }
 
+interface InstrumentsPayload {
+  instruments?: Array<{ symbol: string; label: string; instrumentType: 'index' | 'stock'; snapshots: number }>;
+  error?: string;
+}
+
 function SymbolSearch({
   value,
-  onChange,
+  options,
   onSelect,
+  onInvalid,
 }: {
   value: string;
-  onChange: (v: string) => void;
+  options: InstrumentOption[];
   onSelect: (sym: string) => void;
+  onInvalid: (value: string) => void;
 }) {
   const [query, setQuery] = useState(value);
-  const [selectedSym, setSelectedSym] = useState(value); // tracks the full NSE:XX-EQ symbol
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Keep input in sync when symbol changes externally (e.g. initial load)
-  useEffect(() => { setQuery(value); setSelectedSym(value); }, [value]);
-
   const q = query.trim().toUpperCase();
-  const filtered = q.length === 0 ? [] : instruments.filter(
+  const filtered = q.length === 0 ? options.slice(0, 12) : options.filter(
     ([sym, label]) => label.includes(q) || sym.includes(q)
   ).slice(0, 12);
 
   function pick(sym: string, label: string) {
     setQuery(label);
-    setSelectedSym(sym);
-    onChange(sym);
     onSelect(sym);
     setOpen(false);
   }
@@ -259,8 +266,7 @@ function SymbolSearch({
       const use = exact ?? filtered[0];
       pick(use[0], use[1]);
     } else {
-      // User typed a raw FYERS symbol directly e.g. NSE:TCS-EQ
-      onSelect(selectedSym || query);
+      onInvalid(query);
       setOpen(false);
     }
   }
@@ -286,9 +292,7 @@ function SymbolSearch({
             onChange={(e) => {
               const v = e.target.value.toUpperCase();
               setQuery(v);
-              setSelectedSym(v); // reset selected sym when user types manually
               setOpen(true);
-              onChange(v);
             }}
             onFocus={() => setOpen(true)}
             onKeyDown={(e) => {
@@ -320,7 +324,7 @@ function SymbolSearch({
           <Search data-icon="inline-start" />Analyze
         </Button>
       </div>
-      <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Type a ticker like TCS, SBIN, NIFTY — click a result or press Enter to load.</span>
+      <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Only supported NSE indices and F&amp;O stocks with saved OI data are listed.</span>
     </div>
   );
 }
@@ -328,6 +332,7 @@ function SymbolSearch({
 export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [analysis, setAnalysis] = useState<DashboardAnalysis>(initial);
   const [symbol, setSymbol] = useState(initial.snapshot.symbol);
+  const [instrumentOptions, setInstrumentOptions] = useState<InstrumentOption[]>(indexFallback);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
@@ -341,10 +346,18 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [showAppId, setShowAppId] = useState(false);
   const [showSecretId, setShowSecretId] = useState(false);
   const [setupSaving, setSetupSaving] = useState(false);
+  const autoBackfillAttempted = useRef(new Set<string>());
   const initialSource = initial.snapshot.source;
   const initialSymbol = initial.snapshot.symbol;
 
   useEffect(() => {
+    void fetch('/api/market/instruments', { cache: 'no-store' })
+      .then((response) => response.json() as Promise<InstrumentsPayload>)
+      .then((payload) => {
+        if (!payload.instruments?.length) return;
+        setInstrumentOptions(payload.instruments.map((item) => [item.symbol, item.label]));
+      })
+      .catch(() => undefined);
     void fetch('/api/auth/fyers/status', { cache: 'no-store' })
       .then((response) => response.json() as Promise<{ configured: boolean; connected: boolean }>)
       .then((status) => {
@@ -358,6 +371,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
               setDataStatus(payload.dataStatus ?? null);
               setWallStats(payload.wallStats ?? null);
               setQuarterStats(payload.quarterStats ?? []);
+              maybeAutoBackfill(initialSymbol, payload);
             })
             .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load FYERS data.'));
         }
@@ -371,6 +385,21 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     }
     if (result) window.history.replaceState({}, '', window.location.pathname);
   }, [initialSource, initialSymbol]);
+
+  function maybeAutoBackfill(targetSymbol: string, payload: ChainPayload) {
+    const evaluated = (payload.wallStats?.support.evaluated ?? 0)
+      + (payload.wallStats?.resistance.evaluated ?? 0);
+    const storedSnapshots = payload.dataStatus?.storedOiSnapshots ?? 0;
+    if (
+      payload.analysis?.snapshot.source !== 'demo'
+      && storedSnapshots >= 10
+      && evaluated === 0
+      && !autoBackfillAttempted.current.has(targetSymbol)
+    ) {
+      autoBackfillAttempted.current.add(targetSymbol);
+      void runBackfillFor(targetSymbol);
+    }
+  }
 
   async function load(nextSymbol = symbol) {
     const normalized = normalizeSymbol(nextSymbol);
@@ -394,11 +423,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       setDataStatus(payload.dataStatus ?? null);
       setWallStats(payload.wallStats ?? null);
       setQuarterStats(payload.quarterStats ?? []);
-      // Auto-trigger backfill when the symbol has no historical tests yet
-      const tests = payload.analysis.positional?.historicalTests ?? 0;
-      if (tests === 0 && payload.analysis.snapshot.source !== 'demo') {
-        void runBackfillFor(normalized);
-      }
+      // Imported OI can have price-zone tests but still lack evaluated OI-wall
+      // outcomes. Trigger from actual wall coverage, once per symbol.
+      maybeAutoBackfill(normalized, payload);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to refresh.');
     } finally { setLoading(false); }
@@ -512,9 +539,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">
           <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Two-horizon level map</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Intraday OI and positional support/resistance</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">The intraday map reads live positioning strength. The positional map combines current OI with six months of daily price-zone behaviour. They are kept separate so daily history is never presented as intraday proof.</p></div>
           <SymbolSearch
+            key={symbol}
             value={symbol}
-            onChange={setSymbol}
+            options={instrumentOptions}
             onSelect={(sym) => { setSymbol(sym); void load(sym); }}
+            onInvalid={(value) => setError(`${value || 'That symbol'} is not in the supported NSE index/F&O list with saved OI data.`)}
           />
           <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Expiry<select className="h-10 rounded-lg border border-input bg-background px-3 text-sm font-bold normal-case tracking-normal text-foreground" aria-label="Expiry"><option>{snapshot.expiry}</option></select></label>
         </section>
@@ -590,7 +619,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
           </section>
         )}
 
-        {wallStats && (wallStats.support.evaluated > 0 || wallStats.resistance.evaluated > 0) && (
+        {wallStats && (
           <section className="mt-4 rounded-2xl border border-border/70 bg-card/80 p-5 sm:p-6">
             <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary">
               <ShieldCheck className="size-4" /> Pure OI wall outcomes
@@ -599,6 +628,13 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             <p className="mt-1 text-xs text-muted-foreground">
               Evaluated over 10 trading sessions per declaration. Only walls that price actually reached are counted in hold/break rates.
             </p>
+            {wallStats.support.evaluated + wallStats.resistance.evaluated === 0 && (
+              <div className="mt-4 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100">
+                {(dataStatus?.storedOiSnapshots ?? 0) >= 10
+                  ? `${dataStatus?.storedOiSnapshots} saved OI snapshots found. Historical walls are being prepared; use Run Backfill if this message remains.`
+                  : `Only ${dataStatus?.storedOiSnapshots ?? 0} saved OI snapshots are available. At least 10 are required before automatic wall backfill starts.`}
+              </div>
+            )}
             <div className="mt-5 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>

@@ -40,3 +40,5 @@ next-env.d.ts
 *.tsbuildinfo
 __pycache__/
 nse_oi_backfill.sql
+nse_oi_update.sql
+backfill_data.sql

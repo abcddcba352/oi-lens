@@ -5,6 +5,7 @@ import {
   evaluatePendingWalls,
   loadFeatureThresholds,
   loadHistoricalObservations,
+  loadOiCoverage,
   loadOiHistoryContext,
   loadOrRefreshPriceHistory,
   loadWallTrainingObservations,
@@ -14,7 +15,7 @@ import {
   persistWallPredictions,
 } from '@/lib/history-store';
 import type { QuarterStats } from '@/lib/history-store';
-import { getDb } from '@/db';
+import { ensureDbSchema, getDb } from '@/db';
 import { instruments, oiSnapshots, oiStrikes } from '@/db/schema';
 import { asc, eq } from 'drizzle-orm';
 import type { HistoricalLevelObservation, MarketSnapshot, OiHistoryContext } from '@/lib/market-types';
@@ -28,6 +29,13 @@ export async function GET(request: Request) {
   const expiryRaw = url.searchParams.get('expiry');
   const expiryEpoch = expiryRaw ? Number(expiryRaw) : undefined;
   if (expiryRaw && (!Number.isInteger(expiryEpoch) || (expiryEpoch ?? 0) <= 0)) return Response.json({ error: 'Expiry must be a positive Unix timestamp.' }, { status: 400 });
+
+  try {
+    await ensureDbSchema();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to initialize the historical database.';
+    return Response.json({ error: message }, { status: 500 });
+  }
 
   const backfill = url.searchParams.get('backfill') === 'true';
   if (backfill) {
@@ -178,6 +186,7 @@ export async function GET(request: Request) {
     let oiSnapshotWarning: string | null = null;
     let wallStats = null;
     let quarterStats: QuarterStats[] = [];
+    let oiCoverage = { snapshots: 0, firstSnapshot: null as string | null, latestSnapshot: null as string | null };
 
     try {
       const snapshotId = await persistSnapshot(analysis.snapshot);
@@ -189,10 +198,11 @@ export async function GET(request: Request) {
       // Always load wall stats from D1 — even when market is closed, FYERS
       // is not connected, or no new snapshot was stored this request.
       // This ensures "Observed 10-session wall outcomes" shows backfilled data.
-      [wallStats, featureThresholds, quarterStats] = await Promise.all([
+      [wallStats, featureThresholds, quarterStats, oiCoverage] = await Promise.all([
         loadWallStats(symbol),
         loadFeatureThresholds(symbol),
         loadWallStatsByQuarter(symbol),
+        loadOiCoverage(symbol),
       ]);
     } catch {
       oiSnapshotWarning = 'Live analysis loaded. OI archival will retry on the next refresh.';
@@ -212,6 +222,9 @@ export async function GET(request: Request) {
           oiSnapshotStored,
           oiSnapshotWarning,
           oiSnapshotIntervalMinutes: 15,
+          storedOiSnapshots: oiCoverage.snapshots,
+          earliestOiSnapshot: oiCoverage.firstSnapshot,
+          latestOiSnapshot: oiCoverage.latestSnapshot,
         },
       },
       { headers: { 'Cache-Control': 'private, no-store, max-age=0' } },
