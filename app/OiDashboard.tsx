@@ -193,7 +193,7 @@ const instruments = [
   ['NSE:VEDL-EQ', 'VEDL'],
   ['NSE:VOLTAS-EQ', 'VOLTAS'],
   ['NSE:WIPRO-EQ', 'WIPRO'],
-  ['NSE:ZEELEAVE-EQ', 'ZEELEAVE'],
+  ['NSE:ZEEL-EQ', 'ZEEL'],
   ['NSE:ZYDUSLIFE-EQ', 'ZYDUSLIFE'],
 ] as const;
 
@@ -382,7 +382,13 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     setLoading(true); setError(null);
     try {
       const response = await fetch(`/api/market/chain?symbol=${encodeURIComponent(normalized)}`, { cache: 'no-store' });
-      const payload = await response.json() as ChainPayload;
+      const text = await response.text();
+      let payload: ChainPayload;
+      try {
+        payload = JSON.parse(text) as ChainPayload;
+      } catch {
+        throw new Error(`Server returned an unexpected response for ${normalized}. The symbol may not be available in FYERS F&O, or FYERS may be temporarily unavailable.`);
+      }
       if (!response.ok || !payload.analysis) throw new Error(payload.error ?? 'Unable to load option-chain data.');
       setAnalysis({ ...payload.analysis, featureThresholds: payload.featureThresholds });
       setDataStatus(payload.dataStatus ?? null);
