@@ -185,12 +185,15 @@ export async function GET(request: Request) {
         oiSnapshotStored = true;
         await persistWallPredictions(analysis.snapshot, snapshotId);
         await evaluatePendingWalls(symbol, cached.history);
-        [wallStats, featureThresholds, quarterStats] = await Promise.all([
-          loadWallStats(symbol),
-          loadFeatureThresholds(symbol),
-          loadWallStatsByQuarter(symbol),
-        ]);
       }
+      // Always load wall stats from D1 — even when market is closed, FYERS
+      // is not connected, or no new snapshot was stored this request.
+      // This ensures "Observed 10-session wall outcomes" shows backfilled data.
+      [wallStats, featureThresholds, quarterStats] = await Promise.all([
+        loadWallStats(symbol),
+        loadFeatureThresholds(symbol),
+        loadWallStatsByQuarter(symbol),
+      ]);
     } catch {
       oiSnapshotWarning = 'Live analysis loaded. OI archival will retry on the next refresh.';
     }
