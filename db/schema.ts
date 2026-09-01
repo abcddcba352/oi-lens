@@ -43,6 +43,7 @@ export const wallPredictions = sqliteTable('wall_predictions', {
   atr14AtDeclaration: real('atr14_at_declaration').notNull(),
   // Outcome fields — filled in by evaluatePendingWalls
   evaluatedAt: text('evaluated_at'),
+  evaluationVersion: integer('evaluation_version').notNull().default(1),
   horizonSessions: integer('horizon_sessions').notNull().default(10),
   reached: integer('reached', { mode: 'boolean' }),
   daysToReach: integer('days_to_reach'),
@@ -55,6 +56,7 @@ export const wallPredictions = sqliteTable('wall_predictions', {
   index('wall_predictions_instrument_date_idx').on(table.instrumentId, table.declaredDate),
   index('wall_predictions_instrument_side_idx').on(table.instrumentId, table.side),
   index('wall_predictions_evaluated_idx').on(table.evaluatedAt),
+  index('wall_predictions_evaluation_version_idx').on(table.instrumentId, table.evaluationVersion, table.declaredDate),
 ]);
 
 export const modelCalibrations = sqliteTable('model_calibrations', {

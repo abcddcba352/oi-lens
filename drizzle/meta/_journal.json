@@ -15,6 +15,13 @@
       "when": 1788148800000,
       "tag": "0001_wall_predictions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1788278938551,
+      "tag": "0002_easy_black_bolt",
+      "breakpoints": true
     }
   ]
 }

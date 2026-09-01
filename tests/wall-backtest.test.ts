@@ -134,6 +134,31 @@ test('evaluateFromHistory waits for the complete declared horizon', () => {
   assert.equal(result, null);
 });
 
+test('stock walls use the matching stock sessions for expiry-limited outcomes', () => {
+  const sessions = [
+    { date: '2026-08-24', high: 2_300, low: 2_270, close: 2_284.09 },
+    { date: '2026-08-25', high: 2_313.5, low: 2_262, close: 2_296.2 },
+  ];
+  const support = evaluateFromHistory(sessions, '2026-08-24', 2_280, 'support', 50, 1);
+  const resistance = evaluateFromHistory(sessions, '2026-08-24', 2_320, 'resistance', 50, 1);
+  assert.deepEqual(support, {
+    reached: true,
+    daysToReach: 1,
+    held: true,
+    broke: false,
+    bouncePoints: null,
+    bounceAtr: null,
+  });
+  assert.deepEqual(resistance, {
+    reached: true,
+    daysToReach: 1,
+    held: true,
+    broke: false,
+    bouncePoints: null,
+    bounceAtr: null,
+  });
+});
+
 test('expiry horizon counts actual weekdays instead of scaling calendar days', () => {
   const expiryEpoch = Math.floor(Date.parse('2026-08-31T10:00:00+05:30') / 1_000);
   assert.equal(tradingSessionsUntilExpiry('2026-08-28T10:00:00+05:30', expiryEpoch), 1);

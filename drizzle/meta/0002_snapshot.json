@@ -1,0 +1,856 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "1877b6b8-0821-4a62-af2d-441056fd343a",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "tables": {
+    "instruments": {
+      "name": "instruments",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "symbol": {
+          "name": "symbol",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instrument_type": {
+          "name": "instrument_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "strike_step": {
+          "name": "strike_step",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "instruments_symbol_unique": {
+          "name": "instruments_symbol_unique",
+          "columns": [
+            "symbol"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "level_outcomes": {
+      "name": "level_outcomes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "session_date": {
+          "name": "session_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "side": {
+          "name": "side",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "strike": {
+          "name": "strike",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "tested": {
+          "name": "tested",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "held": {
+          "name": "held",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "features_json": {
+          "name": "features_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "horizon_sessions": {
+          "name": "horizon_sessions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 3
+        }
+      },
+      "indexes": {
+        "level_outcomes_instrument_date_idx": {
+          "name": "level_outcomes_instrument_date_idx",
+          "columns": [
+            "instrument_id",
+            "session_date"
+          ],
+          "isUnique": false
+        },
+        "level_outcomes_side_tested_idx": {
+          "name": "level_outcomes_side_tested_idx",
+          "columns": [
+            "side",
+            "tested"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "level_outcomes_instrument_id_instruments_id_fk": {
+          "name": "level_outcomes_instrument_id_instruments_id_fk",
+          "tableFrom": "level_outcomes",
+          "tableTo": "instruments",
+          "columnsFrom": [
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "level_outcomes_snapshot_id_oi_snapshots_id_fk": {
+          "name": "level_outcomes_snapshot_id_oi_snapshots_id_fk",
+          "tableFrom": "level_outcomes",
+          "tableTo": "oi_snapshots",
+          "columnsFrom": [
+            "snapshot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "market_sessions": {
+      "name": "market_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_date": {
+          "name": "session_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "open": {
+          "name": "open",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "high": {
+          "name": "high",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "low": {
+          "name": "low",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "close": {
+          "name": "close",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "atr14": {
+          "name": "atr14",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "market_sessions_instrument_date_unique": {
+          "name": "market_sessions_instrument_date_unique",
+          "columns": [
+            "instrument_id",
+            "session_date"
+          ],
+          "isUnique": true
+        },
+        "market_sessions_date_idx": {
+          "name": "market_sessions_date_idx",
+          "columns": [
+            "session_date"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "market_sessions_instrument_id_instruments_id_fk": {
+          "name": "market_sessions_instrument_id_instruments_id_fk",
+          "tableFrom": "market_sessions",
+          "tableTo": "instruments",
+          "columnsFrom": [
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "model_calibrations": {
+      "name": "model_calibrations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "trained_at": {
+          "name": "trained_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lookback_start": {
+          "name": "lookback_start",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "lookback_end": {
+          "name": "lookback_end",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "samples": {
+          "name": "samples",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "validation_samples": {
+          "name": "validation_samples",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "balanced_accuracy": {
+          "name": "balanced_accuracy",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "brier_score": {
+          "name": "brier_score",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "coefficients_json": {
+          "name": "coefficients_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "model_calibrations_instrument_trained_idx": {
+          "name": "model_calibrations_instrument_trained_idx",
+          "columns": [
+            "instrument_id",
+            "trained_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "model_calibrations_instrument_id_instruments_id_fk": {
+          "name": "model_calibrations_instrument_id_instruments_id_fk",
+          "tableFrom": "model_calibrations",
+          "tableTo": "instruments",
+          "columnsFrom": [
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "oi_snapshots": {
+      "name": "oi_snapshots",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "captured_at": {
+          "name": "captured_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expiry": {
+          "name": "expiry",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expiry_epoch": {
+          "name": "expiry_epoch",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "spot": {
+          "name": "spot",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "spot_change_percent": {
+          "name": "spot_change_percent",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "atr14": {
+          "name": "atr14",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "iv_percentile": {
+          "name": "iv_percentile",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "oi_snapshots_instrument_captured_idx": {
+          "name": "oi_snapshots_instrument_captured_idx",
+          "columns": [
+            "instrument_id",
+            "captured_at"
+          ],
+          "isUnique": false
+        },
+        "oi_snapshots_expiry_idx": {
+          "name": "oi_snapshots_expiry_idx",
+          "columns": [
+            "expiry_epoch"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "oi_snapshots_instrument_id_instruments_id_fk": {
+          "name": "oi_snapshots_instrument_id_instruments_id_fk",
+          "tableFrom": "oi_snapshots",
+          "tableTo": "instruments",
+          "columnsFrom": [
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "oi_strikes": {
+      "name": "oi_strikes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "strike": {
+          "name": "strike",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "call_oi": {
+          "name": "call_oi",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "call_oi_change": {
+          "name": "call_oi_change",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "call_volume": {
+          "name": "call_volume",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "call_iv": {
+          "name": "call_iv",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "put_oi": {
+          "name": "put_oi",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "put_oi_change": {
+          "name": "put_oi_change",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "put_volume": {
+          "name": "put_volume",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "put_iv": {
+          "name": "put_iv",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "oi_strikes_snapshot_strike_unique": {
+          "name": "oi_strikes_snapshot_strike_unique",
+          "columns": [
+            "snapshot_id",
+            "strike"
+          ],
+          "isUnique": true
+        },
+        "oi_strikes_strike_idx": {
+          "name": "oi_strikes_strike_idx",
+          "columns": [
+            "strike"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "oi_strikes_snapshot_id_oi_snapshots_id_fk": {
+          "name": "oi_strikes_snapshot_id_oi_snapshots_id_fk",
+          "tableFrom": "oi_strikes",
+          "tableTo": "oi_snapshots",
+          "columnsFrom": [
+            "snapshot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "wall_predictions": {
+      "name": "wall_predictions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "instrument_id": {
+          "name": "instrument_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "snapshot_id": {
+          "name": "snapshot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "declared_date": {
+          "name": "declared_date",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "side": {
+          "name": "side",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "strike": {
+          "name": "strike",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "spot_at_declaration": {
+          "name": "spot_at_declaration",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "oi_at_declaration": {
+          "name": "oi_at_declaration",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "oi_change_at_declaration": {
+          "name": "oi_change_at_declaration",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "cluster_score": {
+          "name": "cluster_score",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "atr14_at_declaration": {
+          "name": "atr14_at_declaration",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evaluated_at": {
+          "name": "evaluated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "evaluation_version": {
+          "name": "evaluation_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "horizon_sessions": {
+          "name": "horizon_sessions",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 10
+        },
+        "reached": {
+          "name": "reached",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "days_to_reach": {
+          "name": "days_to_reach",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "held": {
+          "name": "held",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bounce_points": {
+          "name": "bounce_points",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bounce_atr": {
+          "name": "bounce_atr",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "broke": {
+          "name": "broke",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "wall_predictions_snapshot_side_unique": {
+          "name": "wall_predictions_snapshot_side_unique",
+          "columns": [
+            "snapshot_id",
+            "side"
+          ],
+          "isUnique": true
+        },
+        "wall_predictions_instrument_date_idx": {
+          "name": "wall_predictions_instrument_date_idx",
+          "columns": [
+            "instrument_id",
+            "declared_date"
+          ],
+          "isUnique": false
+        },
+        "wall_predictions_instrument_side_idx": {
+          "name": "wall_predictions_instrument_side_idx",
+          "columns": [
+            "instrument_id",
+            "side"
+          ],
+          "isUnique": false
+        },
+        "wall_predictions_evaluated_idx": {
+          "name": "wall_predictions_evaluated_idx",
+          "columns": [
+            "evaluated_at"
+          ],
+          "isUnique": false
+        },
+        "wall_predictions_evaluation_version_idx": {
+          "name": "wall_predictions_evaluation_version_idx",
+          "columns": [
+            "instrument_id",
+            "evaluation_version",
+            "declared_date"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "wall_predictions_instrument_id_instruments_id_fk": {
+          "name": "wall_predictions_instrument_id_instruments_id_fk",
+          "tableFrom": "wall_predictions",
+          "tableTo": "instruments",
+          "columnsFrom": [
+            "instrument_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "wall_predictions_snapshot_id_oi_snapshots_id_fk": {
+          "name": "wall_predictions_snapshot_id_oi_snapshots_id_fk",
+          "tableFrom": "wall_predictions",
+          "tableTo": "oi_snapshots",
+          "columnsFrom": [
+            "snapshot_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

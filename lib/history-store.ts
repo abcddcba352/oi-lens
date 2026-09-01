@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:workers';
-import { and, asc, desc, eq, gte, inArray, isNull, lte, lt, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, lte, lt, or, sql } from 'drizzle-orm';
 import { getDb } from '@/db';
 import { instruments, levelOutcomes, marketSessions, oiSnapshots, oiStrikes, wallPredictions } from '@/db/schema';
 import type { HistoricalLevelObservation, LevelFeatures, LevelSide, MarketSnapshot, OiHistoryContext, OiHistorySnapshot, PriceSession } from './market-types';
@@ -18,6 +18,10 @@ const STRIKE_INSERT_CHUNK = 8;
 // 10 trading sessions ≈ 14 calendar days.
 const OI_CONTEXT_DAYS = 21;
 const OI_CONTEXT_MAX_SNAPSHOTS = 240;
+// Version 2 recalculates legacy outcomes from each instrument's own sessions.
+// Some imported stock rows were evaluated against a different price scale.
+export const WALL_EVALUATION_VERSION = 2;
+const WALL_EVALUATION_BATCH_LIMIT = 300;
 
 export interface OiCoverage {
   snapshots: number;
@@ -263,6 +267,14 @@ export async function persistWallPredictions(snapshot: MarketSnapshot, snapshotI
           clusterScore: values.clusterScore,
           atr14AtDeclaration: values.atr14AtDeclaration,
           horizonSessions: values.horizonSessions,
+          evaluatedAt: null,
+          evaluationVersion: 1,
+          reached: null,
+          daysToReach: null,
+          held: null,
+          bouncePoints: null,
+          bounceAtr: null,
+          broke: null,
         },
       }),
     );
@@ -274,10 +286,10 @@ export async function persistWallPredictions(snapshot: MarketSnapshot, snapshotI
 // ─── Backfill evaluation ──────────────────────────────────────────────────────
 
 /**
- * For every unevaluated wall prediction (evaluatedAt IS NULL) that is old enough
- * to have sufficient future candles in priceHistory, compute and write the outcome.
+ * For every unevaluated or stale-version wall prediction that is old enough to
+ * have sufficient future candles in priceHistory, compute and write the outcome.
  *
- * Processes at most 50 rows per call to stay within D1 write limits.
+ * Processes a bounded number of rows and batches writes in D1-safe chunks.
  * Safe to call on every request — idempotent for already-evaluated rows.
  *
  * @param symbol        Instrument symbol.
@@ -294,17 +306,21 @@ export async function evaluatePendingWalls(symbol: string, priceHistory: PriceSe
     .where(
       and(
         eq(wallPredictions.instrumentId, symbol),
-        isNull(wallPredictions.evaluatedAt),
+        or(
+          isNull(wallPredictions.evaluatedAt),
+          lt(wallPredictions.evaluationVersion, WALL_EVALUATION_VERSION),
+        ),
         lt(wallPredictions.declaredDate, today),
       ),
     )
     .orderBy(asc(wallPredictions.declaredDate))
-    .limit(50);
+    .limit(WALL_EVALUATION_BATCH_LIMIT);
 
   if (!pending.length) return;
 
   const now = new Date().toISOString();
 
+  const updates = [];
   for (const row of pending) {
     const outcome = evaluateFromHistory(
       priceHistory,
@@ -316,18 +332,26 @@ export async function evaluatePendingWalls(symbol: string, priceHistory: PriceSe
     );
     if (!outcome) continue; // not enough future sessions yet; skip
 
-    await db
-      .update(wallPredictions)
-      .set({
-        evaluatedAt: now,
-        reached: outcome.reached,
-        daysToReach: outcome.daysToReach,
-        held: outcome.held,
-        bouncePoints: outcome.bouncePoints,
-        bounceAtr: outcome.bounceAtr,
-        broke: outcome.broke,
-      })
-      .where(eq(wallPredictions.id, row.id));
+    updates.push(env.DB.prepare(`
+      UPDATE wall_predictions SET
+        evaluated_at = ?, evaluation_version = ?, reached = ?, days_to_reach = ?,
+        held = ?, bounce_points = ?, bounce_atr = ?, broke = ?
+      WHERE id = ?
+    `).bind(
+      now,
+      WALL_EVALUATION_VERSION,
+      outcome.reached ? 1 : 0,
+      outcome.daysToReach,
+      outcome.held ? 1 : 0,
+      outcome.bouncePoints,
+      outcome.bounceAtr,
+      outcome.broke ? 1 : 0,
+      row.id,
+    ));
+  }
+
+  for (let index = 0; index < updates.length; index += 50) {
+    await env.DB.batch(updates.slice(index, index + 50));
   }
 }
 
@@ -369,6 +393,7 @@ export async function loadWallStats(symbol: string, lookbackDays = 183): Promise
         eq(wallPredictions.instrumentId, symbol),
         gte(wallPredictions.declaredDate, startDate),
         sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+        eq(wallPredictions.evaluationVersion, WALL_EVALUATION_VERSION),
       ),
     );
 
@@ -423,6 +448,7 @@ export async function loadWallTrainingObservations(
         eq(wallPredictions.instrumentId, symbol),
         gte(wallPredictions.declaredDate, startDate),
         sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+        eq(wallPredictions.evaluationVersion, WALL_EVALUATION_VERSION),
       ),
     );
 
@@ -488,6 +514,7 @@ export async function loadFeatureThresholds(
         eq(wallPredictions.instrumentId, symbol),
         gte(wallPredictions.declaredDate, startDate),
         sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+        eq(wallPredictions.evaluationVersion, WALL_EVALUATION_VERSION),
       ),
     );
 
@@ -531,6 +558,7 @@ export async function loadWallStatsByQuarter(symbol: string): Promise<QuarterSta
         eq(wallPredictions.instrumentId, symbol),
         gte(wallPredictions.declaredDate, startDate),
         sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+        eq(wallPredictions.evaluationVersion, WALL_EVALUATION_VERSION),
       ),
     )
     .orderBy(asc(wallPredictions.declaredDate));

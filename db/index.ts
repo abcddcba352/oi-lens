@@ -73,6 +73,7 @@ export async function ensureDbSchema() {
       spot_at_declaration REAL NOT NULL, oi_at_declaration INTEGER NOT NULL,
       oi_change_at_declaration INTEGER NOT NULL, cluster_score REAL NOT NULL,
       atr14_at_declaration REAL NOT NULL, evaluated_at TEXT,
+      evaluation_version INTEGER DEFAULT 1 NOT NULL,
       horizon_sessions INTEGER DEFAULT 10 NOT NULL, reached INTEGER, days_to_reach INTEGER,
       held INTEGER, bounce_points REAL, bounce_atr REAL, broke INTEGER,
       FOREIGN KEY (instrument_id) REFERENCES instruments(id),
@@ -94,6 +95,13 @@ export async function ensureDbSchema() {
 
   schemaReady = env.DB.batch(statements.map((statement) => env.DB.prepare(statement)))
     .then(async () => {
+      const columnInfo = await env.DB.prepare('PRAGMA table_info(wall_predictions)').all<{ name: string }>();
+      if (!columnInfo.results.some((column) => column.name === 'evaluation_version')) {
+        await env.DB.prepare('ALTER TABLE wall_predictions ADD COLUMN evaluation_version INTEGER DEFAULT 1 NOT NULL').run();
+      }
+      await env.DB.prepare(
+        'CREATE INDEX IF NOT EXISTS wall_predictions_evaluation_version_idx ON wall_predictions(instrument_id, evaluation_version, declared_date)',
+      ).run();
       const now = new Date().toISOString();
       await env.DB.batch([
         ['NSE:NIFTY50-INDEX', 'NIFTY 50', 50],
