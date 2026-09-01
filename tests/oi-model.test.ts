@@ -4,6 +4,13 @@ import { getDemoObservations, getDemoPersistence, getDemoPriceHistory, getDemoSn
 import { analyzeSnapshot, analyzeSnapshotWithPriceHistory, atrFromPriceHistory, calibrateModel, filterSixMonthObservations, labelLevelOutcome } from '../lib/oi-model.ts';
 import type { OiHistoryContext } from '../lib/market-types.ts';
 
+test('unknown stock symbols never fall back to the NIFTY demo snapshot', () => {
+  assert.throws(
+    () => getDemoSnapshot('NSE:TCS-EQ'),
+    /No demo snapshot is available for NSE:TCS-EQ/,
+  );
+});
+
 test('six-month filter excludes present and future observations', () => {
   const snapshot = getDemoSnapshot();
   const observations = getDemoObservations(snapshot.symbol, snapshot.asOf);

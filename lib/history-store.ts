@@ -156,6 +156,57 @@ export async function loadOiCoverage(symbol: string): Promise<OiCoverage> {
   };
 }
 
+/** Load the latest archived OI chain for a symbol when a live broker session is
+ * unavailable. This keeps stock identity and price scale intact instead of
+ * substituting a demo index snapshot. */
+export async function loadLatestStoredSnapshot(
+  symbol: string,
+  expiryEpoch?: number,
+): Promise<MarketSnapshot | null> {
+  const db = getDb();
+  const snapshotRows = expiryEpoch !== undefined
+    ? await db.select().from(oiSnapshots)
+        .where(and(eq(oiSnapshots.instrumentId, symbol), eq(oiSnapshots.expiryEpoch, expiryEpoch)))
+        .orderBy(desc(oiSnapshots.capturedAt)).limit(1)
+    : await db.select().from(oiSnapshots)
+        .where(eq(oiSnapshots.instrumentId, symbol))
+        .orderBy(desc(oiSnapshots.capturedAt)).limit(1);
+  const snapshot = snapshotRows[0];
+  if (!snapshot) return null;
+
+  const [metadata, strikes] = await Promise.all([
+    db.select().from(instruments).where(eq(instruments.id, symbol)).limit(1),
+    db.select().from(oiStrikes).where(eq(oiStrikes.snapshotId, snapshot.id)),
+  ]);
+  if (!strikes.length) return null;
+  const instrument = metadata[0];
+  return {
+    symbol,
+    displayName: instrument?.displayName ?? symbol.replace(/^NSE:|-(EQ|INDEX)$/g, ''),
+    instrumentType: instrument?.instrumentType ?? (symbol.endsWith('-INDEX') ? 'index' : 'stock'),
+    spot: snapshot.spot,
+    spotChangePercent: snapshot.spotChangePercent,
+    expiry: snapshot.expiry,
+    expiryEpoch: snapshot.expiryEpoch ?? undefined,
+    strikeStep: instrument?.strikeStep ?? 50,
+    atr14: snapshot.atr14,
+    ivPercentile: snapshot.ivPercentile,
+    asOf: snapshot.capturedAt,
+    source: snapshot.source === 'fyers' ? 'fyers' : 'nse-bhavcopy',
+    chain: strikes.map((row) => ({
+      strike: row.strike,
+      callOi: row.callOi,
+      callOiChange: row.callOiChange,
+      callVolume: row.callVolume,
+      callIv: row.callIv ?? undefined,
+      putOi: row.putOi,
+      putOiChange: row.putOiChange,
+      putVolume: row.putVolume,
+      putIv: row.putIv ?? undefined,
+    })),
+  };
+}
+
 async function upsertSessions(symbol: string, sessions: PriceSession[]) {
   if (!sessions.length) return;
   const statements = sessions.map((session) => env.DB.prepare(`
@@ -293,14 +344,6 @@ export async function persistWallPredictions(snapshot: MarketSnapshot, snapshotI
           clusterScore: values.clusterScore,
           atr14AtDeclaration: values.atr14AtDeclaration,
           horizonSessions: values.horizonSessions,
-          evaluatedAt: null,
-          evaluationVersion: 1,
-          reached: null,
-          daysToReach: null,
-          held: null,
-          bouncePoints: null,
-          bounceAtr: null,
-          broke: null,
         },
       }),
     );

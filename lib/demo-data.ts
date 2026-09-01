@@ -62,7 +62,11 @@ function demoFeatures(index: number): LevelFeatures {
 }
 
 export function getDemoSnapshot(symbol = 'NSE:NIFTY50-INDEX') {
-  return structuredClone(snapshots[symbol] ?? snapshots['NSE:NIFTY50-INDEX']);
+  const snapshot = snapshots[symbol];
+  if (!snapshot) {
+    throw new Error(`No demo snapshot is available for ${symbol}. Connect FYERS or import saved OI data first.`);
+  }
+  return structuredClone(snapshot);
 }
 
 export function getDemoPriceHistory(symbol: string, asOf: string): PriceSession[] {

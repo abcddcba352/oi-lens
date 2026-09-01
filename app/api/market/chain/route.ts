@@ -6,6 +6,7 @@ import {
   loadFeatureThresholds,
   loadHistoricalObservations,
   loadCachedPriceHistory,
+  loadLatestStoredSnapshot,
   loadOiCoverage,
   loadOiHistoryContext,
   loadOrRefreshPriceHistory,
@@ -141,9 +142,19 @@ export async function GET(request: Request) {
 
 
   try {
-    const provider = getMarketProvider(await readFyersAuthorization(request));
-    const snapshot = await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
-    const cached = await loadOrRefreshPriceHistory(provider, snapshot);
+    const authorization = await readFyersAuthorization(request);
+    const provider = getMarketProvider(authorization);
+    const storedSnapshot = provider.id === 'demo'
+      ? await loadLatestStoredSnapshot(symbol, expiryEpoch)
+      : null;
+    const snapshot = storedSnapshot
+      ?? await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
+    const cached = provider.id === 'demo' && snapshot.source !== 'demo'
+      ? await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf)
+      : await loadOrRefreshPriceHistory(provider, snapshot);
+    if (!cached) {
+      throw new Error('Connect FYERS once to cache this instrument\'s daily history.');
+    }
 
     if (snapshot.spotChangePercent === 0 && cached.history.length >= 2) {
       const todayIso = snapshot.asOf.slice(0, 10);

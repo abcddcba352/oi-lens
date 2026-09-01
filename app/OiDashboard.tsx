@@ -362,18 +362,18 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       .then((response) => response.json() as Promise<{ configured: boolean; connected: boolean }>)
       .then((status) => {
         setFyers({ ...status, checked: true });
-        if (status.connected && initialSource !== 'fyers') {
+        if ((status.connected && initialSource !== 'fyers') || initialSource === 'demo') {
           void fetch(`/api/market/chain?symbol=${encodeURIComponent(initialSymbol)}`, { cache: 'no-store' })
             .then((response) => response.json() as Promise<ChainPayload>)
             .then((payload) => {
-              if (!payload.analysis) throw new Error(payload.error ?? 'Unable to load FYERS data.');
+              if (!payload.analysis) throw new Error(payload.error ?? 'Unable to load market data.');
               setAnalysis({ ...payload.analysis, featureThresholds: payload.featureThresholds });
               setDataStatus(payload.dataStatus ?? null);
               setWallStats(payload.wallStats ?? null);
               setQuarterStats(payload.quarterStats ?? []);
               maybeAutoBackfill(initialSymbol, payload);
             })
-            .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load FYERS data.'));
+            .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load market data.'));
         }
       })
       .catch(() => setFyers((current) => ({ ...current, checked: true })));
@@ -503,7 +503,11 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const fyersRedirectUrl = typeof window === 'undefined'
     ? '/api/auth/fyers/callback'
     : `${window.location.origin}/api/auth/fyers/callback`;
-  const modeLabel = snapshot.source === 'fyers' ? 'FYERS live chain' : 'Demo data · FYERS ready';
+  const modeLabel = snapshot.source === 'fyers' && fyers.connected
+    ? 'FYERS live chain'
+    : snapshot.source !== 'demo'
+      ? 'Saved OI snapshot'
+      : 'Demo data · FYERS ready';
   const dateFormatter = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' });
   const rangePosition = Math.round((analysis.rangePosition ?? 0.5) * 100);
 
