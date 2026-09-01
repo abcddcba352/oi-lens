@@ -232,11 +232,12 @@ function SymbolSearch({
   onSelect: (sym: string) => void;
 }) {
   const [query, setQuery] = useState(value);
+  const [selectedSym, setSelectedSym] = useState(value); // tracks the full NSE:XX-EQ symbol
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Keep input in sync when symbol changes externally (e.g. initial load)
-  useEffect(() => { setQuery(value); }, [value]);
+  useEffect(() => { setQuery(value); setSelectedSym(value); }, [value]);
 
   const q = query.trim().toUpperCase();
   const filtered = q.length === 0 ? [] : instruments.filter(
@@ -245,9 +246,23 @@ function SymbolSearch({
 
   function pick(sym: string, label: string) {
     setQuery(label);
+    setSelectedSym(sym);
     onChange(sym);
     onSelect(sym);
     setOpen(false);
+  }
+
+  function analyze() {
+    // If user typed a raw short ticker like "TCS" and the first match is exact, use that
+    if (filtered.length > 0) {
+      const exact = filtered.find(([, label]) => label === q);
+      const use = exact ?? filtered[0];
+      pick(use[0], use[1]);
+    } else {
+      // User typed a raw FYERS symbol directly e.g. NSE:TCS-EQ
+      onSelect(selectedSym || query);
+      setOpen(false);
+    }
   }
 
   // Close dropdown when clicking outside
@@ -268,14 +283,16 @@ function SymbolSearch({
           <Input
             id="instrument-symbol"
             value={query}
-            onChange={(e) => { setQuery(e.target.value.toUpperCase()); setOpen(true); onChange(e.target.value.toUpperCase()); }}
+            onChange={(e) => {
+              const v = e.target.value.toUpperCase();
+              setQuery(v);
+              setSelectedSym(v); // reset selected sym when user types manually
+              setOpen(true);
+              onChange(v);
+            }}
             onFocus={() => setOpen(true)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                if (filtered.length > 0) { pick(filtered[0][0], filtered[0][1]); }
-                else { onSelect(query); setOpen(false); }
-              }
+              if (e.key === 'Enter') { e.preventDefault(); analyze(); }
               if (e.key === 'Escape') setOpen(false);
             }}
             className="h-10 pl-9 font-mono text-sm font-bold uppercase"
@@ -299,11 +316,11 @@ function SymbolSearch({
             </ul>
           )}
         </div>
-        <Button type="button" size="lg" onClick={() => onSelect(query)}>
+        <Button type="button" size="lg" onClick={analyze}>
           <Search data-icon="inline-start" />Analyze
         </Button>
       </div>
-      <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Type a ticker like TCS, SBIN, M&amp;M — click or press Enter to load.</span>
+      <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Type a ticker like TCS, SBIN, NIFTY — click a result or press Enter to load.</span>
     </div>
   );
 }
