@@ -2,6 +2,7 @@ import {
   featureNames,
   type HistoricalLevelObservation,
   type OiHistoryContext,
+  type CurrentConfluenceReport,
   type LevelFeatures,
   type LevelSide,
   type MarketAnalysis,
@@ -11,6 +12,8 @@ import {
   type TimeframeAnalysis,
 } from './market-types.ts';
 import { tradingSessionsUntilExpiry } from './wall-backtest.ts';
+import { findConfirmedPivots, groupPivotsIntoZones, buildConfluenceInfo } from './price-levels.ts';
+
 
 const DAY = 86_400_000;
 const SIX_MONTH_DAYS = 183;
@@ -777,6 +780,28 @@ export function analyzeSnapshotWithPriceHistory(
   const totalPutOi = liveSnapshot.chain.reduce((sum, row) => sum + row.putOi, 0);
   const totalCallOi = liveSnapshot.chain.reduce((sum, row) => sum + row.callOi, 0);
 
+  // ─── Current confluence: OI wall vs confirmed price S/R ──────────────
+  let currentConfluence: CurrentConfluenceReport | undefined;
+  if (history.length >= 10 && (positional.primarySupport || positional.primaryResistance)) {
+    const pivots = findConfirmedPivots(history);
+    const zones = groupPivotsIntoZones(pivots, history, liveSnapshot.atr14, liveSnapshot.strikeStep);
+    const supportDetail = positional.primarySupport
+      ? {
+          oiWall: positional.primarySupport.strike,
+          oiStrength: positional.primarySupport.score,
+          ...buildConfluenceInfo(zones, positional.primarySupport.strike, 'support', liveSnapshot.atr14, liveSnapshot.strikeStep),
+        }
+      : null;
+    const resistanceDetail = positional.primaryResistance
+      ? {
+          oiWall: positional.primaryResistance.strike,
+          oiStrength: positional.primaryResistance.score,
+          ...buildConfluenceInfo(zones, positional.primaryResistance.strike, 'resistance', liveSnapshot.atr14, liveSnapshot.strikeStep),
+        }
+      : null;
+    currentConfluence = { support: supportDetail, resistance: resistanceDetail };
+  }
+
   return {
     snapshot: liveSnapshot,
     intraday,
@@ -799,6 +824,7 @@ export function analyzeSnapshotWithPriceHistory(
       brierScore: null,
       note: positional.note,
     },
+    currentConfluence,
   };
 }
 

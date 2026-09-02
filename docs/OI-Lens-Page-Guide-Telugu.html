@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="te">
+<head>
+  <meta charset="utf-8">
+  <title>OI Lens Page Guide - Telugu</title>
+  <style>
+    @page { size: A4; margin: 16mm 14mm 16mm; }
+    :root { --ink:#17212b; --muted:#536170; --line:#d9e1e8; --blue:#155eaf; --green:#19764b; --red:#a83a34; --violet:#5d3faf; --soft:#f5f8fb; }
+    * { box-sizing:border-box; }
+    body { color:var(--ink); font-family:"Nirmala UI","Segoe UI",Arial,sans-serif; font-size:10.2pt; line-height:1.52; margin:0; }
+    h1,h2,h3 { line-height:1.2; margin:0 0 8px; }
+    h1 { color:var(--blue); font-size:25pt; }
+    h2 { border-bottom:2px solid var(--blue); color:var(--blue); font-size:16pt; margin-top:22px; padding-bottom:5px; }
+    h3 { color:#233b55; font-size:12.4pt; margin-top:16px; }
+    p { margin:5px 0 9px; }
+    .cover { min-height:245mm; padding-top:42mm; }
+    .kicker { color:var(--blue); font-size:11pt; font-weight:700; letter-spacing:.4px; text-transform:uppercase; }
+    .subtitle { color:var(--muted); font-size:14pt; max-width:145mm; }
+    .note { background:#fff8e8; border-left:4px solid #c98700; margin:12px 0; padding:10px 12px; }
+    .good { background:#eef8f2; border-left:4px solid var(--green); margin:12px 0; padding:10px 12px; }
+    .danger { background:#fff1f0; border-left:4px solid var(--red); margin:12px 0; padding:10px 12px; }
+    .box { background:var(--soft); border:1px solid var(--line); break-inside:avoid; margin:10px 0; padding:11px 13px; }
+    .grid { display:grid; gap:10px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .full { grid-column:1/-1; }
+    table { border-collapse:collapse; font-size:9.3pt; margin:10px 0 15px; width:100%; }
+    th { background:#eaf2fb; color:#1a4f85; font-weight:700; text-align:left; }
+    td,th { border:1px solid var(--line); padding:7px; vertical-align:top; }
+    ul,ol { margin:6px 0 10px; padding-left:22px; }
+    li { margin:3px 0; }
+    code,.formula { background:#edf3f8; border-radius:3px; font-family:Consolas,"Courier New",monospace; font-size:9pt; padding:1px 4px; }
+    .formula { display:block; margin:7px 0; padding:8px; white-space:pre-wrap; }
+    .flow { display:flex; gap:7px; margin:10px 0; }
+    .step { background:#edf5fc; border:1px solid #bfd7ed; flex:1; min-width:0; padding:9px; text-align:center; }
+    .arrow { align-self:center; color:var(--blue); font-size:17pt; }
+    .pill { border-radius:99px; display:inline-block; font-size:8.6pt; font-weight:700; margin-right:5px; padding:2px 7px; }
+    .support { background:#e9f8ef; color:var(--green); }
+    .resistance { background:#fff0ef; color:var(--red); }
+    .intraday { background:#eaf4ff; color:#1761a4; }
+    .positional { background:#f1eeff; color:var(--violet); }
+    .page-break { break-before:page; }
+    .small { color:var(--muted); font-size:8.6pt; }
+    .footer { color:var(--muted); font-size:8pt; margin-top:18px; text-align:center; }
+  </style>
+</head>
+<body>
+  <section class="cover">
+    <p class="kicker">OI Lens learning guide</p>
+    <h1>OI Lens పేజీని ఎలా చదవాలి?</h1>
+    <p class="subtitle">ప్రతి ప్రధాన పదం అర్థం, data ఎక్కడి నుండి వస్తుంది, calculation ఎలా జరుగుతుంది, మరియు result‌ను ఎలా అర్థం చేసుకోవాలి అనే Telugu guide.</p>
+    <div class="note"><strong>ముఖ్యం:</strong> ఇది analysis tool. Support లేదా resistance ఒక guarantee కాదు. “Strength 60%” అంటే price ఖచ్చితంగా 60% సార్లు hold అవుతుందని కాదు; అది model యొక్క combined ranking score.</div>
+    <div class="box">
+      <h3>ఈ guide‌లో ఉన్న live-page ఉదాహరణ</h3>
+      <p><strong>TCS saved snapshot:</strong> Spot ₹2,369, positional support ₹2,300, positional resistance ₹2,400. ఈ values snapshot సమయానికి సంబంధించిన ఉదాహరణలు మాత్రమే; కొత్త market dataతో మారుతాయి.</p>
+    </div>
+    <h2>మొదట గుర్తుపెట్టుకోవాల్సిన 3 విషయాలు</h2>
+    <div class="flow">
+      <div class="step"><strong>1. Source చూడండి</strong><br>FYERS live chain లేదా Saved OI snapshot</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>2. Horizon చూడండి</strong><br>Intraday లేదా Positional</div>
+      <div class="arrow">→</div>
+      <div class="step"><strong>3. Invalidation చూడండి</strong><br>Level పని చేయకపోయే boundary</div>
+    </div>
+    <p class="footer">OI Lens · Page terminology and calculation guide</p>
+  </section>
+
+  <section class="page-break">
+    <h2>1. పేజీపై మొదట కనిపించే భాగం</h2>
+    <table>
+      <tr><th>పదం</th><th>అర్థం</th><th>ఎలా ఉపయోగించాలి</th></tr>
+      <tr><td><strong>Saved OI snapshot</strong></td><td>ఇప్పటికే databaseలో సేవ్ అయిన option-chain data. ఇది FYERS నుండి ఈ క్షణంలో liveగా రావడం కాదు.</td><td>Time stamp చూడాలి. Data పాతదైతే live trading నిర్ణయానికి మాత్రమే దీనిపై ఆధారపడకండి.</td></tr>
+      <tr><td><strong>FYERS live chain</strong></td><td>Connected FYERS account ద్వారా అప్పటి live option-chain data.</td><td>Live OI, spot మరియు expiry updates కోసం ఉపయోగించాలి.</td></tr>
+      <tr><td><strong>Setup FYERS</strong></td><td>మీ FYERS App ID/Secret IDను browser sessionలో configure చేయడానికి.</td><td>Saved snapshot కాకుండా తాజా broker data కావాలంటే connect చేయాలి.</td></tr>
+      <tr><td><strong>Refresh</strong></td><td>Selected symbolకి data మళ్లీ load చేస్తుంది.</td><td>Saved modeలో అదే latest saved snapshot రావచ్చు; FYERS live modeలో తాజా chain రావాలి.</td></tr>
+      <tr><td><strong>Any index or F&amp;O stock</strong></td><td>Search box. Supported NSE indices మరియు saved OI data ఉన్న F&amp;O stocks మాత్రమే తీసుకుంటుంది.</td><td>TCS, SBIN, NIFTY లాంటి symbol type చేసి Analyze చేయండి.</td></tr>
+      <tr><td><strong>Expiry</strong></td><td>Analysis చేస్తున్న options contract expiry date.</td><td>Expiry దగ్గరగా ఉంటే positional horizon చిన్నదవుతుంది.</td></tr>
+    </table>
+    <div class="danger"><strong>అర్థం చేసుకోవాల్సిన తేడా:</strong> “Live site” అంటే website onlineలో ఉంది అని. అది “live market data” అని తప్పనిసరిగా అర్థం కాదు. Page‌లో ఉన్న source labelనే నిజమైన data freshnessకి చూడాలి.</div>
+
+    <h2>2. Symbol summary card</h2>
+    <div class="grid">
+      <div class="box"><h3>STOCK / INDEX</h3><p>ఎంచుకున్న instrument type. Stock అయితే model అదే stockకు సంబంధించిన OI outcomesనే ఉపయోగిస్తుంది. Index అయితే ఆ index data ఉపయోగిస్తుంది.</p></div>
+      <div class="box"><h3>Spot</h3><p>Underlying యొక్క current/saved price. అన్ని distance calculations దీనితోనే జరుగుతాయి.</p></div>
+      <div class="box"><h3>Today %</h3><p>రోజు ధర మార్పు శాతం. <code>(current spot - previous close) / previous close × 100</code></p></div>
+      <div class="box"><h3>Stock-specific model</h3><p>ఉదాహరణకు TCS అయితే TCS historical OI walls మాత్రమే calibrationకి ఉపయోగిస్తాయి. NIFTY data కలపదు.</p></div>
+    </div>
+  </section>
+
+  <section class="page-break">
+    <h2>3. Two-horizon level map అంటే ఏమిటి?</h2>
+    <p>అదే OI chainను రెండు వేర్వేరు ప్రశ్నలకు ఉపయోగిస్తుంది. అందుకే రెండు maps ఉంటాయి.</p>
+    <table>
+      <tr><th></th><th>Intraday OI map</th><th>Positional price-zone map</th></tr>
+      <tr><td><strong>కాలం</strong></td><td>ప్రస్తుత trading session</td><td>గరిష్ఠం 10 trading sessions లేదా expiry—ఏది ముందుగా వస్తే అది</td></tr>
+      <tr><td><strong>ప్రధాన input</strong></td><td>Current OI cluster, option volume, spotకి దగ్గరగా ఉందా, saved same-day OI movement</td><td>Current OIతో పాటు 6 నెలల daily price-zone behaviour మరియు past OI wall outcomes</td></tr>
+      <tr><td><strong>History claim</strong></td><td>లేదు. Intraday scoreను historical probabilityగా చూపదు.</td><td>ఉంది. Daily price-zone tests మరియు same-instrument outcomesని చూపుతుంది.</td></tr>
+      <tr><td><strong>Zone</strong></td><td>చిన్నది—short-term movement కోసం</td><td>పెద్దది—stock volatility మరియు several sessions కోసం</td></tr>
+    </table>
+    <div class="good"><strong>సరైన విధానం:</strong> చిన్న trade timeframe అయితే Intraday map చూడండి. కొన్ని రోజుల view అయితే Positional map చూడండి. రెండు scoresను కలిపి ఒకే probability అనుకోకండి.</div>
+
+    <h2>4. Support, resistance, distance మరియు range bar</h2>
+    <p><span class="pill support">Support</span> Spot కంటే దిగువన ఉన్న Put OI candidate. Price దిగివచ్చినప్పుడు buying/put-positioning reaction కనిపించవచ్చు.</p>
+    <p><span class="pill resistance">Resistance</span> Spot కంటే పైభాగంలో ఉన్న Call OI candidate. Price పైకి వెళ్లినప్పుడు selling/call-positioning reaction కనిపించవచ్చు.</p>
+    <div class="box">
+      <h3>TCS positional ఉదాహరణ</h3>
+      <p>Spot ₹2,369; support ₹2,300; resistance ₹2,400.</p>
+      <p class="formula">Support distance = |2,369 - 2,300| = 69 points
+Support distance % = 69 / 2,369 × 100 = 2.91%
+
+Resistance distance = |2,369 - 2,400| = 31 points
+Resistance distance % = 31 / 2,369 × 100 = 1.31%</p>
+      <p><strong>Spot is 69% through the selected OI range</strong> అంటే support మరియు resistance మధ్య ఉన్న rangeలో spot ఏ positionలో ఉంది అనేది. ఇది direction prediction కాదు; spot ఏ wallకు దగ్గరగా ఉందో చెప్పే context మాత్రమే.</p>
+    </div>
+  </section>
+
+  <section class="page-break">
+    <h2>5. Right-side metrics అర్థం</h2>
+    <table>
+      <tr><th>Metric</th><th>Meaning</th><th>Calculation / source</th></tr>
+      <tr><td><strong>History window</strong></td><td>Model చూసే daily-price lookback period.</td><td>సాధారణంగా గత 6 నెలలు; start మరియు end dates pageలో చూపుతుంది.</td></tr>
+      <tr><td><strong>Historical input</strong></td><td>Walk-forward validationలో ఉపయోగించిన sessions count.</td><td>ఇది మొత్తం cached days అనే అర్థం కాదు; validation subset count.</td></tr>
+      <tr><td><strong>Price-zone evidence</strong></td><td>Past daily candlesలో primary zone నిజంగా test అయిన సందర్భాలు.</td><td><strong>18 daily tests · 32% held</strong> అంటే 18 touch-eventsలో weighted 32% సందర్భాల్లో zone hold అయింది.</td></tr>
+      <tr><td><strong>OI archive</strong></td><td>Option-chain snapshots archive అయ్యాయా అనే స్థితి.</td><td>సాధారణంగా ఒక snapshot ప్రతి 15-minute windowకి. “Recording” అంటే archive write చేయగల స్థితి; source labelను కూడా చూడాలి.</td></tr>
+      <tr><td><strong>PCR</strong></td><td>Put Call Ratio.</td><td><code>Total Put OI / Total Call OI</code>. 1కి పైగా puts ఎక్కువ, 1కి దిగువ calls ఎక్కువ. ఇది standalone buy/sell signal కాదు.</td></tr>
+      <tr><td><strong>ATR</strong></td><td>Average True Range—సాధారణ daily volatility scale.</td><td>Zone width మరియు invalidation distance volatilityకి సరిపడేలా చేయడానికి ఉపయోగిస్తారు.</td></tr>
+      <tr><td><strong>Max pain</strong></td><td>Expiry వద్ద total option payout అత్యల్పంగా ఉండే strike.</td><td>ప్రతి possible strike వద్ద call/put intrinsic payout కలిపి, అత్యల్ప total ఉన్న strike తీసుకుంటుంది. ఇది expiry target guarantee కాదు.</td></tr>
+    </table>
+  </section>
+
+  <section class="page-break">
+    <h2>6. Intraday OI map ఎలా calculate అవుతుంది?</h2>
+    <p><span class="pill intraday">Current trading session</span> ఇది immediate positioning strength map. Intraday scoreను historical hold probabilityగా చూపదు.</p>
+    <h3>Candidate ఎలా ఎంచుకుంటుంది?</h3>
+    <ul>
+      <li>Spot కంటే దిగువన ఉన్న strikesలో Put OI ఉంటే support candidate.</li>
+      <li>Spot కంటే పైభాగంలో ఉన్న strikesలో Call OI ఉంటే resistance candidate.</li>
+      <li>Stock chainలో thin/isolated rows ఉంటే, కనీసం మూడు liquid alternatives ఉన్నప్పుడు weak rowsను తగ్గిస్తుంది.</li>
+      <li>Cluster OI కోసం neighbouring 5 strikesకు weights ఉపయోగిస్తుంది: <code>0.25, 0.60, 1.00, 0.60, 0.25</code>. మధ్య strikeకు ఎక్కువ weight.</li>
+    </ul>
+    <h3>Intraday strength score</h3>
+    <p>0–100 scoreకు కింది live inputs weight కలిగి ఉంటాయి:</p>
+    <table>
+      <tr><th>Input</th><th>Weight</th><th>అర్థం</th></tr>
+      <tr><td>Cluster OI</td><td>35%</td><td>ఆ strike చుట్టూ OI wall ఎంత thickగా ఉంది.</td></tr>
+      <tr><td>Volume confirmation</td><td>23%</td><td>Option contractsలో participation/liquidity ఉందా.</td></tr>
+      <tr><td>Proximity</td><td>18%</td><td>Spotకి దగ్గరగా ఉన్న levelకి ఎక్కువ relevance.</td></tr>
+      <tr><td>Observed saved OI flow</td><td>15%</td><td>ఈ app సేవ్ చేసిన intraday snapshots మధ్య OI movement.</td></tr>
+      <tr><td>OI persistence</td><td>9%</td><td>Wall snapshotsలో నిలకడగా కనిపించిందా.</td></tr>
+    </table>
+    <div class="note"><strong>“No intraday historical claim” ఎందుకు?</strong> Broker చూపించే OI change చాలాసార్లు previous trading dayతో పోలిక. అది నిజమైన intraday flow అని చెప్పలేం. Appకు స్వంతంగా కనీసం రెండు saved live snapshots ఉన్నప్పుడు మాత్రమే observed flow ఉపయోగిస్తుంది.</div>
+  </section>
+
+  <section class="page-break">
+    <h2>7. Intraday zone width మరియు invalidation</h2>
+    <p>Wall ఒక exact tick కాదు. చిన్న rangeలో reaction వచ్చినా level పనిచేసినట్లే కావచ్చు. అందుకే zone మరియు invalidation రెండు వేరు.</p>
+    <div class="grid">
+      <div class="box">
+        <h3>Zone width</h3>
+        <p>Wall చుట్టూ normal reaction area.</p>
+        <p class="formula">Stock intraday zone = max(ATR × 0.14,
+strike step × 0.30)</p>
+      </div>
+      <div class="box">
+        <h3>Invalidation distance</h3>
+        <p>Wallకి అవతల ఎంత దూరం వెళితే signal brokenగా చూడాలి అనే boundary.</p>
+        <p class="formula">Stock intraday invalidation = max(ATR × 0.20,
+strike step × 0.20)</p>
+      </div>
+    </div>
+    <div class="box">
+      <h3>TCS intraday example</h3>
+      <p>ATR ≈ 59.27; strike step = 20.</p>
+      <p class="formula">Zone = max(59.27 × 0.14, 20 × 0.30)
+     = max(8.30, 6.00) = ±8.30
+
+Invalidation = max(59.27 × 0.20, 20 × 0.20)
+             = max(11.85, 4.00) = 11.85</p>
+      <p><strong>Support 2,300:</strong> zone ₹2,291.70–₹2,308.30; invalid below ₹2,288.15.</p>
+      <p><strong>Resistance 2,400:</strong> zone ₹2,391.70–₹2,408.30; invalid above ₹2,411.85.</p>
+    </div>
+  </section>
+
+  <section class="page-break">
+    <h2>8. Positional price-zone map ఎలా calculate అవుతుంది?</h2>
+    <p><span class="pill positional">Up to 10 trading sessions or expiry</span> ఇది several-days view. Expiry ముందుగా వస్తే expiryతోనే horizon ముగుస్తుంది.</p>
+    <h3>Positional scoreలో ఉపయోగించే inputs — Stock</h3>
+    <table>
+      <tr><th>Input</th><th>Weight</th><th>అర్థం</th></tr>
+      <tr><td>Cluster OI</td><td>24%</td><td>Nearby strikesతో కలిపిన OI wall thickness.</td></tr>
+      <tr><td>OI change strength</td><td>14%</td><td>Current contract addition/unwinding strength.</td></tr>
+      <tr><td>Volume confirmation</td><td>16%</td><td>Liquidity మరియు participation.</td></tr>
+      <tr><td>Proximity</td><td>8%</td><td>Spotకి దగ్గరగా ఉన్న wallకు relevance.</td></tr>
+      <tr><td>Historical price-zone defence</td><td>22%</td><td>గత daily price touches తర్వాత level hold అయ్యిందా అనే evidence.</td></tr>
+      <tr><td>Same-expiry OI continuity</td><td>10%</td><td>గరిష్ఠం 21 saved calendar daysలో wall నిలకడ.</td></tr>
+      <tr><td>Regime fit</td><td>6%</td><td>ప్రస్తుత ATR volatility, recent typical rangeతో సరిపోతుందా.</td></tr>
+    </table>
+    <div class="good"><strong>149 same-instrument outcomes</strong> కనిపిస్తే: గత 6 నెలల TCS OI wall declarationsలో completed 10-session outcomesతో model calibration అవుతుంది. Stockకి this calibrated historical OI evidence scoreలో material weight (50% blend)గా చేరుతుంది.</div>
+    <p><strong>Positional strength 59%</strong> అంటే పై inputs మరియు calibrated past outcome evidence కలిపిన ranking score. ఇది “₹2,300 వద్ద price 59% chanceతో hold అవుతుంది” అనే direct promise కాదు.</p>
+  </section>
+
+  <section class="page-break">
+    <h2>9. Positional zone width, invalidation మరియు daily tests</h2>
+    <div class="grid">
+      <div class="box"><h3>Positional zone</h3><p class="formula">Stock positional zone = max(ATR × 0.24,
+strike step × 0.45)</p></div>
+      <div class="box"><h3>Positional invalidation</h3><p class="formula">Stock positional invalidation = max(ATR × 0.32,
+strike step × 0.30)</p></div>
+    </div>
+    <div class="box">
+      <h3>TCS positional example</h3>
+      <p class="formula">Zone = max(59.27 × 0.24, 20 × 0.45)
+     = max(14.23, 9.00) = ±14.23
+
+Invalidation = max(59.27 × 0.32, 20 × 0.30)
+             = max(18.97, 6.00) = 18.97</p>
+      <p><strong>Support ₹2,300:</strong> zone ₹2,285.77–₹2,314.23; invalid below <strong>₹2,281.03</strong>.</p>
+      <p><strong>Resistance ₹2,400:</strong> zone ₹2,385.77–₹2,414.23; invalid above <strong>₹2,418.97</strong>.</p>
+    </div>
+    <h3>“18 daily tests · 32% held after touch”</h3>
+    <ul>
+      <li><strong>18 daily tests:</strong> primary support/resistance zones గత daily candlesలో 18 సార్లు test అయ్యాయి.</li>
+      <li><strong>Touch:</strong> candle expected side నుండి వచ్చి zoneని touch చేసింది.</li>
+      <li><strong>Held:</strong> touch తర్వాత తదుపరి కొద్ది sessionsలో ATR breach tolerance దాటకుండా, చివరి close తిరిగి level సరైన వైపున ఉంది.</li>
+      <li><strong>32% held:</strong> ఈ testsలో recency-weighted hold rate. ఇది current scoreతో ఒకే విషయం కాదు.</li>
+    </ul>
+  </section>
+
+  <section class="page-break">
+    <h2>10. Recorded wall outcomes</h2>
+    <p>ఈ section saved wall declarationsను తర్వాత price నిజంగా reach చేసినప్పుడు వచ్చిన observed resultsను summaryగా చూపుతుంది. ఇది context మాత్రమే, future prediction కాదు.</p>
+    <table>
+      <tr><th>Term</th><th>Meaning</th></tr>
+      <tr><td><strong>Fresh OI Build-up</strong></td><td>Wall ప్రకటించినప్పుడు contracts added అయ్యాయి (+OI). ఈ groupలో reached walls ఎంత శాతం hold అయ్యాయో చూపుతుంది.</td></tr>
+      <tr><td><strong>OI Unwinding</strong></td><td>Wall ప్రకటించినప్పుడు contracts తగ్గాయి (-OI). ఈ groupలో hold rate.</td></tr>
+      <tr><td><strong>Clustered Wall Thickness</strong></td><td>ఒకే strike కాకుండా nearby strikesలో కూడా OI thickగా ఉంది. Multi-strike wall group hold rate.</td></tr>
+      <tr><td><strong>Single Isolated Strike</strong></td><td>ఒక thin single strikeలో మాత్రమే OI ఉంది. ఈ group hold rate.</td></tr>
+    </table>
+
+    <h2>11. Pure OI wall outcomes table</h2>
+    <table>
+      <tr><th>Column</th><th>Meaning</th></tr>
+      <tr><td>Side</td><td>Support లేదా resistance wall.</td></tr>
+      <tr><td>Evaluated</td><td>10-session/expiry horizon పూర్తి అయిన wall declarations count.</td></tr>
+      <tr><td>Reached</td><td>Price ఆ wall zoneని నిజంగా test చేసిన count.</td></tr>
+      <tr><td>Reach %</td><td><code>Reached / Evaluated × 100</code>.</td></tr>
+      <tr><td>Held</td><td>Reach తర్వాత breach tolerance దాటకుండా, చివరి close level సరైన వైపున ఉన్న count.</td></tr>
+      <tr><td>Hold %</td><td><code>Held / Reached × 100</code>. Reach కాలేని wallsను denominatorలో పెట్టదు.</td></tr>
+      <tr><td>Broke</td><td>Reach అయిన తర్వాత supportకి close చాలా దిగువకు లేదా resistanceకి చాలా పైకి వెళ్లిన count.</td></tr>
+      <tr><td>Avg Bounce ATR</td><td>Reach తర్వాత average reboundను ATR multiplesలో చూపుతుంది. ఉదా: 1.38× అంటే average move సుమారు 1.38 ATR.</td></tr>
+    </table>
+  </section>
+
+  <section class="page-break">
+    <h2>12. Quarterly Stability / Walk-forward validation</h2>
+    <p>ఒకే మొత్తం six-month number చూసి model మంచిదని అనకూడదు. అందుకే calendar quartersగా విడదీసి stability చూపుతుంది.</p>
+    <table>
+      <tr><th>Column</th><th>Meaning</th></tr>
+      <tr><td>Quarter</td><td>Jan–Mar, Apr–Jun వంటి out-of-sample period.</td></tr>
+      <tr><td>Evaluated</td><td>ఆ quarterలో support + resistance wall declarations మొత్తం.</td></tr>
+      <tr><td>Support Held</td><td>ఆ quarterలో reached support wallsలో hold rate.</td></tr>
+      <tr><td>Resistance Held</td><td>ఆ quarterలో reached resistance wallsలో hold rate.</td></tr>
+      <tr><td>Combined Hold %</td><td><code>(support held + resistance held) / (support reached + resistance reached) × 100</code>.</td></tr>
+    </table>
+    <div class="note"><strong>ఎలా చదవాలి:</strong> అన్ని quartersలో rate సమీపంగా ఉంటే model consistency మెరుగ్గా ఉంది అని చెప్పవచ్చు. ఒక quarterలోనే చాలా ఎక్కువగా ఉండి, మిగతా quartersలో చాలా తక్కువగా ఉంటే sample size/regime effect ఉండవచ్చు. ఇది strategy profitability report కాదు.</div>
+
+    <h2>13. Pageను ఉపయోగించే సరైన క్రమం</h2>
+    <ol>
+      <li>Source label చూడండి: FYERS live లేదా saved snapshot?</li>
+      <li>Symbol, expiry, timestamp మరియు spot సరైనవా చూడండి.</li>
+      <li>మీ timeframe ఎంచుకోండి: same-dayకి Intraday; multiple daysకి Positional.</li>
+      <li>Primary support/resistanceకి distance చూడండి.</li>
+      <li>Wallని exact priceగా కాకుండా zoneగా చూడండి.</li>
+      <li>Invalidation దాటితే ఆ wall ideaను తిరిగి పరిశీలించండి.</li>
+      <li>Strength score, historical tests, pure OI outcomes, quarterly table—allను contextగా చూడండి; ఒక్క metricతో నిర్ణయం తీసుకోకండి.</li>
+    </ol>
+    <div class="danger"><strong>చివరి reminder:</strong> OI, price history మరియు model scores uncertaintyని తొలగించవు. Position size, stop/risk rules, liquidity, news/events మరియు personal financial situationను వేరుగా పరిగణించాలి.</div>
+    <p class="footer">Prepared for OI Lens · Based on the page structure and current model rules · PDF generated locally</p>
+  </section>
+</body>
+</html>

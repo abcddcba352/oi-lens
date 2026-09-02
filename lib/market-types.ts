@@ -143,6 +143,8 @@ export interface MarketAnalysis {
   maxPain: number | null;
   rangePosition: number | null;
   diagnostics: ModelDiagnostics;
+  modelComparison?: ModelComparisonReport;
+  currentConfluence?: CurrentConfluenceReport;
 }
 
 export interface PriceSession {
@@ -152,4 +154,46 @@ export interface PriceSession {
   low: number;
   close: number;
   volume?: number;
+}
+
+// ─── Model comparison types ──────────────────────────────────────────────────
+
+export interface ModelReport {
+  trainingSamples: number;
+  validationSamples: number;
+  balancedAccuracy: number | null;
+  brierScore: number | null;
+  holdRate: number;
+  supportSamples: number;
+  resistanceSamples: number;
+  status: 'calibrated' | 'provisional';
+}
+
+export interface ModelComparisonReport {
+  oiOnly: ModelReport;
+  priceOnly: ModelReport;
+  hybrid: ModelReport;
+  winner: 'oi' | 'price' | 'hybrid' | 'insufficient';
+  hybridApproved: boolean;
+  coefficientContributions: { oi: number; price: number; confluence: number } | null;
+  explanation: string;
+}
+
+export interface ConfluenceDetail {
+  oiWall: number;
+  oiStrength: number;
+  nearestPriceLevel: number | null;
+  priceLevelType: 'Confirmed' | 'Projected';
+  distance: number;
+  confluenceTolerance: number;
+  isConfluent: boolean;
+  priceTouches: number;
+  historicalHoldRate: number | null;
+  historicalBreakRate: number | null;
+  sampleCount: number;
+}
+
+export interface CurrentConfluenceReport {
+  support: ConfluenceDetail | null;
+  resistance: ConfluenceDetail | null;
 }

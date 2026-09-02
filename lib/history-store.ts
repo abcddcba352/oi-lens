@@ -657,3 +657,133 @@ export async function loadWallStatsByQuarter(symbol: string): Promise<QuarterSta
     };
   });
 }
+
+// ─── Enriched training observations for model comparison ──────────────────────
+
+import type { ComparisonObservation } from './model-comparison';
+import { findConfirmedPivots, groupPivotsIntoZones, priceSRFeatures } from './price-levels';
+import { atrFromPriceHistory } from './oi-model';
+
+/**
+ * Load evaluated wall predictions enriched with price S/R features for the
+ * three-model comparison.
+ *
+ * **Leakage boundary:** For each wall declared on date D, price features are
+ * computed using ONLY candles with `date < D`.  Future candles are never used
+ * for price evidence — they are only used to determine the wall outcome
+ * (held/broke), which was already evaluated by `evaluatePendingWalls`.
+ *
+ * @param symbol        Instrument symbol.
+ * @param lookbackDays  How far back (default 183 = 6 months).
+ * @returns Array of ComparisonObservation ready for runModelComparison.
+ */
+export async function loadWallTrainingObservationsWithPrice(
+  symbol: string,
+  lookbackDays = 183,
+): Promise<ComparisonObservation[]> {
+  const db = getDb();
+  const today = new Date().toISOString().slice(0, 10);
+  const startDate = dateOffset(today, -lookbackDays);
+
+  // Load all price sessions for the instrument (6 months)
+  const priceRows = await db.select().from(marketSessions)
+    .where(and(
+      eq(marketSessions.instrumentId, symbol),
+      gte(marketSessions.sessionDate, dateOffset(today, -lookbackDays - 30)),
+      lte(marketSessions.sessionDate, today),
+    ))
+    .orderBy(asc(marketSessions.sessionDate));
+
+  const allHistory: PriceSession[] = priceRows.map((row) => ({
+    date: row.sessionDate,
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+  }));
+
+  if (allHistory.length < 20) return [];
+
+  // Load instrument metadata for strikeStep
+  const instrumentRow = await db.select().from(instruments)
+    .where(eq(instruments.id, symbol)).limit(1);
+  const strikeStep = instrumentRow[0]?.strikeStep ?? 50;
+
+  // Load wall prediction rows (same as loadWallTrainingObservations)
+  const rows = await db
+    .select({
+      declaredDate: wallPredictions.declaredDate,
+      side: wallPredictions.side,
+      capturedAt: oiSnapshots.capturedAt,
+      reached: wallPredictions.reached,
+      held: wallPredictions.held,
+      oiChangeAtDeclaration: wallPredictions.oiChangeAtDeclaration,
+      oiAtDeclaration: wallPredictions.oiAtDeclaration,
+      spotAtDeclaration: wallPredictions.spotAtDeclaration,
+      strike: wallPredictions.strike,
+      atr14AtDeclaration: wallPredictions.atr14AtDeclaration,
+      clusterScore: wallPredictions.clusterScore,
+      callVolume: oiStrikes.callVolume,
+      putVolume: oiStrikes.putVolume,
+    })
+    .from(wallPredictions)
+    .innerJoin(oiSnapshots, eq(wallPredictions.snapshotId, oiSnapshots.id))
+    .innerJoin(
+      oiStrikes,
+      and(
+        eq(oiStrikes.snapshotId, wallPredictions.snapshotId),
+        eq(oiStrikes.strike, wallPredictions.strike),
+      ),
+    )
+    .where(
+      and(
+        eq(wallPredictions.instrumentId, symbol),
+        gte(wallPredictions.declaredDate, startDate),
+        sql`${wallPredictions.evaluatedAt} IS NOT NULL`,
+        eq(wallPredictions.evaluationVersion, WALL_EVALUATION_VERSION),
+      ),
+    );
+
+  return latestDailyPredictions(rows).flatMap<ComparisonObservation>((row) => {
+    if (row.reached !== true || row.held === null) return [];
+
+    // OI features (same as loadWallTrainingObservations)
+    const oiChangeNormalized = Math.tanh(row.oiChangeAtDeclaration / Math.max(1, row.oiAtDeclaration * 0.2));
+    const proximity = Math.exp(-Math.abs(row.spotAtDeclaration - row.strike) / Math.max(row.atr14AtDeclaration, 100));
+    const optionVolume = row.side === 'support' ? row.putVolume : row.callVolume;
+    const volumeConfirmation = Math.min(
+      1,
+      Math.max(0, Math.log1p(optionVolume) / Math.max(1, Math.log1p(row.oiAtDeclaration * 2))),
+    );
+
+    const oiFeatures: LevelFeatures = {
+      clusterOi: Math.min(1, Math.max(0, row.clusterScore)),
+      oiChange: Math.min(1, Math.max(-1, oiChangeNormalized)),
+      volumeConfirmation,
+      proximity: Math.min(1, Math.max(0, proximity)),
+      persistence: 0.5,
+      regimeFit: 0.6,
+    };
+
+    // Price features — ONLY candles strictly before the declaration date
+    const historyBeforeD = allHistory.filter((s) => s.date < row.declaredDate);
+    if (historyBeforeD.length < 10) {
+      // Not enough price history before this wall — skip
+      return [];
+    }
+
+    const atr = atrFromPriceHistory(historyBeforeD) || row.atr14AtDeclaration;
+    const pivots = findConfirmedPivots(historyBeforeD);
+    const zones = groupPivotsIntoZones(pivots, historyBeforeD, atr, strikeStep);
+    const priceFeats = priceSRFeatures(zones, row.strike, row.side as LevelSide, atr, strikeStep);
+
+    return [{
+      sessionDate: row.declaredDate,
+      side: row.side as LevelSide,
+      strike: row.strike,
+      held: Boolean(row.held),
+      oiFeatures,
+      priceFeatures: priceFeats,
+    }];
+  });
+}

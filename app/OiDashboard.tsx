@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import type { LevelSignal, MarketAnalysis, TimeframeAnalysis } from '@/lib/market-types';
+import type { ConfluenceDetail, LevelSignal, MarketAnalysis, ModelComparisonReport, ModelReport, CurrentConfluenceReport, TimeframeAnalysis } from '@/lib/market-types';
 import type { FeatureThresholds, WallStats } from '@/lib/wall-backtest';
 import type { QuarterStats } from '@/lib/history-store';
 
@@ -224,6 +224,7 @@ interface ChainPayload {
   featureThresholds?: FeatureThresholds;
   wallStats?: WallStatsResult;
   quarterStats?: QuarterStats[];
+  modelComparison?: ModelComparisonReport;
   dataStatus?: DataStatus;
   error?: string;
 }
@@ -338,6 +339,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
   const [wallStats, setWallStats] = useState<WallStatsResult | null>(null);
   const [quarterStats, setQuarterStats] = useState<QuarterStats[]>([]);
+  const [modelComparison, setModelComparison] = useState<ModelComparisonReport | null>(null);
   const [backfillState, setBackfillState] = useState<{ running: boolean; processed: number; total: number } | null>(null);
   const [fyers, setFyers] = useState({ configured: false, connected: initial.snapshot.source === 'fyers', checked: false });
   const [setupOpen, setSetupOpen] = useState(false);
@@ -371,6 +373,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
               setDataStatus(payload.dataStatus ?? null);
               setWallStats(payload.wallStats ?? null);
               setQuarterStats(payload.quarterStats ?? []);
+              setModelComparison(payload.modelComparison ?? null);
               maybeAutoBackfill(initialSymbol, payload);
             })
             .catch((reason) => setError(reason instanceof Error ? reason.message : 'Unable to load market data.'));
@@ -423,6 +426,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       setDataStatus(payload.dataStatus ?? null);
       setWallStats(payload.wallStats ?? null);
       setQuarterStats(payload.quarterStats ?? []);
+      setModelComparison(payload.modelComparison ?? null);
       // Imported OI can have price-zone tests but still lack evaluated OI-wall
       // outcomes. Trigger from actual wall coverage, once per symbol.
       maybeAutoBackfill(normalized, payload);
@@ -736,6 +740,13 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             </div>
           </section>
         )}
+
+        {/* ─── Model Comparison ──────────────────────────────────────────── */}
+        <ModelComparisonSection comparison={modelComparison} />
+
+        {/* ─── Current OI / Price S/R Confluence ────────────────────────── */}
+        <ConfluenceSection confluence={analysis.currentConfluence} />
+
       </div>
     </main>
 
@@ -789,6 +800,199 @@ function LevelCard({ level, provisional }: { level: LevelSignal; provisional: bo
 function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: string; detail: string }) {
   return <Card className="border-0 bg-card/90 ring-border/70"><CardContent className="p-4"><div className="flex items-center gap-2 text-primary [&_svg]:size-4">{icon}<span className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">{label}</span></div><p className="font-heading mt-2 text-xl font-bold">{value}</p><p className="mt-1 text-[11px] text-muted-foreground">{detail}</p></CardContent></Card>;
 }
+
+function ModelComparisonSection({ comparison }: { comparison: ModelComparisonReport | null }) {
+  if (!comparison) return null;
+
+  const models = [
+    { key: 'oi' as const, label: 'OI Evidence', report: comparison.oiOnly, color: 'sky' },
+    { key: 'price' as const, label: 'Price Confirmation', report: comparison.priceOnly, color: 'amber' },
+    { key: 'hybrid' as const, label: 'Hybrid Confirmation', report: comparison.hybrid, color: 'violet' },
+  ];
+
+  return (
+    <section className="mt-4 rounded-2xl border border-border/70 bg-card/80 p-5 sm:p-6">
+      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary">
+        <Activity className="size-4" /> Past-data model comparison
+      </div>
+      <h2 className="font-heading mt-2 text-xl font-bold">
+        OI vs Price vs Hybrid
+        {comparison.winner !== 'insufficient' && (
+          <Badge variant="outline" className={`ml-3 text-xs ${
+            comparison.winner === 'hybrid' ? 'border-violet-400/30 bg-violet-400/10 text-violet-200'
+            : comparison.winner === 'oi' ? 'border-sky-400/30 bg-sky-400/10 text-sky-200'
+            : 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+          }`}>
+            {comparison.winner === 'hybrid' ? '🏆 Hybrid wins' : comparison.winner === 'oi' ? '🏆 OI wins' : '🏆 Price wins'}
+          </Badge>
+        )}
+      </h2>
+      <p className="mt-1 text-xs text-muted-foreground">{comparison.explanation}</p>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        {models.map(({ key, label, report, color }) => (
+          <ModelCard key={key} label={label} report={report} isWinner={comparison.winner === key} color={color} />
+        ))}
+      </div>
+
+      {comparison.coefficientContributions && (
+        <div className="mt-4 rounded-xl border border-border/60 bg-background/55 p-4">
+          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Learned Contributions (Hybrid)</p>
+          <div className="mt-2 grid grid-cols-3 gap-3 text-center">
+            <div>
+              <p className="text-xs font-bold text-sky-300">OI Features</p>
+              <p className="mt-1 font-mono text-lg font-black">{(comparison.coefficientContributions.oi * 100).toFixed(0)}%</p>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-300">Price Features</p>
+              <p className="mt-1 font-mono text-lg font-black">{(comparison.coefficientContributions.price * 100).toFixed(0)}%</p>
+            </div>
+            <div>
+              <p className="text-xs font-bold text-violet-300">Confluence</p>
+              <p className="mt-1 font-mono text-lg font-black">{(comparison.coefficientContributions.confluence * 100).toFixed(0)}%</p>
+            </div>
+          </div>
+          <p className="mt-2 text-[10px] text-muted-foreground">Contributions derived from normalised hybrid model coefficients. Negative coefficients indicate inverse relationships.</p>
+        </div>
+      )}
+
+      <div className="mt-3 rounded-xl border border-border/50 bg-background/40 p-3 text-[10px] leading-4 text-muted-foreground">
+        <p><strong>Lower Brier score is better</strong> (0 = perfect, 0.25 = coin flip). Balanced accuracy weighs held and broken cases equally.</p>
+        <p className="mt-1">The hybrid replaces individual models <strong>only</strong> when it provably beats both on later unseen data. Daily history validates positional levels only, not intraday probability.</p>
+      </div>
+    </section>
+  );
+}
+
+function ModelCard({ label, report, isWinner, color }: { label: string; report: ModelReport; isWinner: boolean; color: string }) {
+  const borderClass = isWinner
+    ? `border-${color}-400/40 bg-${color}-400/[0.08] ring-1 ring-${color}-400/20`
+    : 'border-border/70 bg-background/70';
+  return (
+    <article className={`rounded-xl border p-4 ${borderClass}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">{label}</span>
+        {isWinner && <Badge className="bg-primary/20 text-primary text-[9px] px-1.5 py-0">Best</Badge>}
+      </div>
+      <div className="mt-3 space-y-2">
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Brier Score</span>
+          <span className="font-mono font-bold">{report.brierScore !== null ? report.brierScore.toFixed(3) : '—'}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Balanced Acc.</span>
+          <span className="font-mono font-bold">{report.balancedAccuracy !== null ? `${(report.balancedAccuracy * 100).toFixed(1)}%` : '—'}</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Hold Rate</span>
+          <span className="font-mono font-bold">{(report.holdRate * 100).toFixed(0)}%</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Validation</span>
+          <span className="font-mono text-muted-foreground">{report.validationSamples} obs</span>
+        </div>
+        <div className="flex justify-between text-xs">
+          <span className="text-muted-foreground">Status</span>
+          <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${report.status === 'calibrated' ? 'border-emerald-400/30 text-emerald-300' : 'border-amber-400/30 text-amber-300'}`}>
+            {report.status}
+          </Badge>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ConfluenceSection({ confluence }: { confluence?: CurrentConfluenceReport }) {
+  if (!confluence) return null;
+  const { support, resistance } = confluence;
+  if (!support && !resistance) return null;
+
+  return (
+    <section className="mt-4 rounded-2xl border border-border/70 bg-card/80 p-5 sm:p-6">
+      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary">
+        <ShieldCheck className="size-4" /> Current OI / Price S/R Confluence
+      </div>
+      <h2 className="font-heading mt-2 text-xl font-bold">Where OI Walls Meet Price History</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Shows how today's primary OI walls align with confirmed historical price support/resistance zones. Confluence means independent evidence agrees on the same level.
+      </p>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {support && <ConfluenceCard detail={support} side="support" />}
+        {resistance && <ConfluenceCard detail={resistance} side="resistance" />}
+      </div>
+      <p className="mt-3 text-[10px] text-muted-foreground">
+        Strength score is derived from current OI evidence. Historical hold percentage is from past price-zone tests. These are separate metrics — strength is not a success probability.
+      </p>
+    </section>
+  );
+}
+
+function ConfluenceCard({ detail, side }: { detail: ConfluenceDetail; side: 'support' | 'resistance' }) {
+  const isSupport = side === 'support';
+  return (
+    <article className={`rounded-xl border p-4 ${isSupport ? 'border-emerald-400/20 bg-emerald-400/[0.04]' : 'border-rose-400/20 bg-rose-400/[0.04]'}`}>
+      <div className="flex items-center justify-between">
+        <span className={`text-[10px] font-black uppercase tracking-[0.12em] ${isSupport ? 'text-emerald-300' : 'text-rose-300'}`}>
+          {side} confluence
+        </span>
+        <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+          detail.isConfluent ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-200' : 'border-border/70 text-muted-foreground'
+        }`}>
+          {detail.isConfluent ? '✓ Confluent' : '✗ Not confluent'}
+        </Badge>
+      </div>
+      <div className="mt-3 space-y-1.5 text-xs">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">OI Wall</span>
+          <span className="font-mono font-bold">{money(detail.oiWall)}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">OI Strength</span>
+          <span className="font-mono font-bold">{detail.oiStrength}%</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Nearest Price S/R</span>
+          <span className="font-mono font-bold">{detail.nearestPriceLevel !== null ? money(detail.nearestPriceLevel) : '—'}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Level Type</span>
+          <Badge variant="outline" className={`text-[9px] px-1.5 py-0 ${
+            detail.priceLevelType === 'Confirmed' ? 'border-emerald-400/30 text-emerald-300' : 'border-amber-400/30 text-amber-300'
+          }`}>{detail.priceLevelType}</Badge>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Distance</span>
+          <span className="font-mono">{money(detail.distance)} pts</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Tolerance</span>
+          <span className="font-mono text-muted-foreground">{money(detail.confluenceTolerance)} pts</span>
+        </div>
+        {detail.priceTouches > 0 && (
+          <>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Price Touches</span>
+              <span className="font-mono font-bold">{detail.priceTouches}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Hold Rate</span>
+              <span className="font-mono font-bold">{detail.historicalHoldRate !== null ? `${(detail.historicalHoldRate * 100).toFixed(0)}%` : '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Break Rate</span>
+              <span className="font-mono">{detail.historicalBreakRate !== null ? `${(detail.historicalBreakRate * 100).toFixed(0)}%` : '—'}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Samples</span>
+              <span className="font-mono text-muted-foreground">{detail.sampleCount}</span>
+            </div>
+          </>
+        )}
+      </div>
+    </article>
+  );
+}
+
 
 function money(value: number) { return new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(value); }
 function compact(value: number) { return new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 }).format(value); }

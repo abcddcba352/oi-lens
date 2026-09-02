@@ -11,12 +11,15 @@ import {
   loadOiHistoryContext,
   loadOrRefreshPriceHistory,
   loadWallTrainingObservations,
+  loadWallTrainingObservationsWithPrice,
   loadWallStats,
   loadWallStatsByQuarter,
   persistSnapshot,
   persistWallPredictions,
 } from '@/lib/history-store';
 import type { QuarterStats } from '@/lib/history-store';
+import { runModelComparison } from '@/lib/model-comparison';
+
 import { ensureDbSchema, getDb } from '@/db';
 import { instruments, oiSnapshots, oiStrikes } from '@/db/schema';
 import { asc, eq } from 'drizzle-orm';
@@ -225,12 +228,29 @@ export async function GET(request: Request) {
       oiSnapshotWarning = 'Live analysis loaded. OI archival will retry on the next refresh.';
     }
 
+    // ─── Model comparison (OI-only vs price-only vs hybrid) ────────────
+    let modelComparison = null;
+    try {
+      const wallCount = (wallStats?.support.evaluated ?? 0) + (wallStats?.resistance.evaluated ?? 0);
+      if (wallCount >= 10) {
+        const enrichedObservations = await loadWallTrainingObservationsWithPrice(symbol);
+        if (enrichedObservations.length >= 10) {
+          const comparison = runModelComparison(enrichedObservations);
+          modelComparison = comparison;
+          analysis.modelComparison = comparison;
+        }
+      }
+    } catch {
+      // Model comparison is non-critical; live analysis still works
+    }
+
     return Response.json(
       {
         analysis,
         wallStats,
         quarterStats,
         featureThresholds,
+        modelComparison,
         provider: provider.id,
         dataStatus: {
           historySource: cached.source,
