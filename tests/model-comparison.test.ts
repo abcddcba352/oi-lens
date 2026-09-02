@@ -54,7 +54,7 @@ function makeObservations(n: number, holdRate = 0.6): ComparisonObservation[] {
     const date = new Date(base.getTime() + i * 86_400_000);
     const dow = date.getUTCDay();
     if (dow === 0 || dow === 6) continue;
-    const held = Math.random() < holdRate;
+    const held = (i % 10) < Math.round(holdRate * 10);
     obs.push({
       sessionDate: date.toISOString().slice(0, 10),
       side: i % 2 === 0 ? 'support' : 'resistance',
@@ -128,36 +128,31 @@ test('findConfirmedPivots returns only pivots where all 5 bars are known', () =>
 
 // ─── Test 3: New-high resistance → Projected ─────────────────────────────────
 
-test('new-high territory labels resistance as Projected', () => {
+test('new-high territory labels resistance as Projected even when older highs exist below spot', () => {
   // Make history where spot is well above all historical highs
   const history = makeHistory(30, 100);
   const pivots = findConfirmedPivots(history);
   const zones = groupPivotsIntoZones(pivots, history, 5, 10);
 
   // Check above all resistance zones — should return Projected
-  const info = buildConfluenceInfo(zones, 200, 'resistance', 5, 10);
+  const info = buildConfluenceInfo(zones, 200, 'resistance', 200, 5, 10);
   // If no resistance zones exist above 200, or none at all, it should be Projected
-  const resistanceZones = zones.filter((z) => z.side === 'resistance');
-  if (resistanceZones.length === 0) {
-    assert.equal(info.priceLevelType, 'Projected');
-    assert.equal(info.isConfluent, false);
-    assert.equal(info.nearestPriceLevel, null);
-  }
+  assert.equal(info.priceLevelType, 'Projected');
+  assert.equal(info.isConfluent, false);
+  assert.equal(info.nearestPriceLevel, null);
 });
 
 // ─── Test 4: New-low support → Projected ─────────────────────────────────────
 
-test('new-low territory labels support as Projected', () => {
+test('new-low territory labels support as Projected even when older lows exist above spot', () => {
   const history = makeHistory(30, 100);
   const pivots = findConfirmedPivots(history);
   const zones = groupPivotsIntoZones(pivots, history, 5, 10);
 
-  const info = buildConfluenceInfo(zones, 50, 'support', 5, 10);
-  const supportZones = zones.filter((z) => z.side === 'support');
-  if (supportZones.length === 0) {
-    assert.equal(info.priceLevelType, 'Projected');
-    assert.equal(info.isConfluent, false);
-  }
+  const info = buildConfluenceInfo(zones, 50, 'support', 50, 5, 10);
+  assert.equal(info.priceLevelType, 'Projected');
+  assert.equal(info.isConfluent, false);
+  assert.equal(info.nearestPriceLevel, null);
 });
 
 // ─── Test 5: Confluence tolerance ─────────────────────────────────────────────
@@ -181,11 +176,12 @@ test('distance within tolerance is confluent, outside is not', () => {
 
   if (zones.length > 0) {
     const zone = zones[0];
+    const spot = zone.side === 'support' ? zone.center + 20 : zone.center - 20;
     // Within tolerance: confluent
-    const nearFeatures = priceSRFeatures(zones, zone.center + tolerance * 0.5, zone.side, atr, strikeStep);
+    const nearFeatures = priceSRFeatures(zones, zone.center + tolerance * 0.5, zone.side, atr, strikeStep, spot);
     assert.equal(nearFeatures.isConfluent, true);
     // Far beyond tolerance: not confluent
-    const farFeatures = priceSRFeatures(zones, zone.center + tolerance * 5, zone.side, atr, strikeStep);
+    const farFeatures = priceSRFeatures(zones, zone.center + tolerance * 5, zone.side, atr, strikeStep, spot);
     assert.equal(farFeatures.isConfluent, false);
   }
 });
@@ -249,6 +245,7 @@ test('hybrid is not approved when Brier improvement is insufficient', () => {
     if (observations.length >= 60) break;
   }
   const result = runModelComparison(observations.slice(0, 60));
+  assert.equal(result.hybridApproved, false);
   // hybridApproved should be false when hybrid can't beat both by 0.01
   if (result.winner !== 'insufficient') {
     // The comparison ran — verify it computed something
@@ -306,7 +303,7 @@ test('empty or very short history produces no pivots', () => {
 // ─── Test 12: price features for no zones returns defaults ───────────────────
 
 test('no price zones returns default neutral features', () => {
-  const features = priceSRFeatures([], 100, 'support', 10, 20);
+  const features = priceSRFeatures([], 100, 'support', 10, 20, 105);
   assert.equal(features.priceHoldRate, 0.5);
   assert.equal(features.priceTouches, 0);
   assert.equal(features.isConfluent, false);

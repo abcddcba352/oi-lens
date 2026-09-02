@@ -775,7 +775,14 @@ export async function loadWallTrainingObservationsWithPrice(
     const atr = atrFromPriceHistory(historyBeforeD) || row.atr14AtDeclaration;
     const pivots = findConfirmedPivots(historyBeforeD);
     const zones = groupPivotsIntoZones(pivots, historyBeforeD, atr, strikeStep);
-    const priceFeats = priceSRFeatures(zones, row.strike, row.side as LevelSide, atr, strikeStep);
+    const priceFeats = priceSRFeatures(
+      zones,
+      row.strike,
+      row.side as LevelSide,
+      atr,
+      strikeStep,
+      row.spotAtDeclaration,
+    );
 
     return [{
       sessionDate: row.declaredDate,

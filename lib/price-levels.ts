@@ -326,9 +326,17 @@ export function priceSRFeatures(
   side: LevelSide,
   atr: number,
   strikeStep: number,
+  spot?: number,
 ): PriceSRFeatureVector {
   const tolerance = confluenceTolerance(atr, strikeStep);
-  const sameSide = zones.filter((z) => z.side === side);
+  // A swing high below spot is not current resistance; likewise, a swing low
+  // above spot is not current support. This keeps new high/low territory
+  // from being incorrectly described as confirmed historical price S/R.
+  const sameSide = zones.filter((z) =>
+    z.side === side && (
+      spot === undefined || (side === 'support' ? z.center <= spot : z.center >= spot)
+    ),
+  );
 
   if (sameSide.length === 0) {
     // No confirmed price level on this side — projected territory
@@ -383,11 +391,14 @@ export function buildConfluenceInfo(
   zones: PriceSRZone[],
   oiWallStrike: number,
   side: LevelSide,
+  spot: number,
   atr: number,
   strikeStep: number,
 ): ConfluenceInfo {
   const tolerance = confluenceTolerance(atr, strikeStep);
-  const sameSide = zones.filter((z) => z.side === side);
+  const sameSide = zones.filter((z) =>
+    z.side === side && (side === 'support' ? z.center <= spot : z.center >= spot),
+  );
 
   if (sameSide.length === 0) {
     return {

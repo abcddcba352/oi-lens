@@ -858,7 +858,7 @@ function ModelComparisonSection({ comparison }: { comparison: ModelComparisonRep
 
       <div className="mt-3 rounded-xl border border-border/50 bg-background/40 p-3 text-[10px] leading-4 text-muted-foreground">
         <p><strong>Lower Brier score is better</strong> (0 = perfect, 0.25 = coin flip). Balanced accuracy weighs held and broken cases equally.</p>
-        <p className="mt-1">The hybrid replaces individual models <strong>only</strong> when it provably beats both on later unseen data. Daily history validates positional levels only, not intraday probability.</p>
+        <p className="mt-1">A hybrid result is treated as a validated confirmation signal only when it beats both baselines on later unseen data. Daily history validates positional levels only, not intraday probability.</p>
       </div>
     </section>
   );
@@ -914,7 +914,7 @@ function ConfluenceSection({ confluence }: { confluence?: CurrentConfluenceRepor
       </div>
       <h2 className="font-heading mt-2 text-xl font-bold">Where OI Walls Meet Price History</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        Shows how today's primary OI walls align with confirmed historical price support/resistance zones. Confluence means independent evidence agrees on the same level.
+        Shows how today&apos;s primary OI walls align with confirmed historical price support/resistance zones. Confluence means independent evidence agrees on the same level.
       </p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
         {support && <ConfluenceCard detail={support} side="support" />}

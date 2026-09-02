@@ -324,7 +324,7 @@ export function runModelComparison(
   // Explanation
   let explanation: string;
   if (hybridApproved) {
-    explanation = `Hybrid model beats both OI-only (Brier ${oiMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) and price-only (Brier ${priceMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) on ${validation.length} unseen validation observations. Live strength weighting updated.`;
+    explanation = `Hybrid model beats both OI-only (Brier ${oiMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) and price-only (Brier ${priceMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) on ${validation.length} unseen validation observations. It is a validated confirmation signal; the displayed OI strength remains a separate ranking until hybrid scoring is explicitly enabled.`;
   } else {
     const reasons: string[] = [];
     if (!brierImprovesOverOi) reasons.push(`Brier did not improve by ≥${BRIER_IMPROVEMENT_THRESHOLD} over OI-only`);

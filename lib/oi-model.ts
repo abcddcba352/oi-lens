@@ -789,14 +789,28 @@ export function analyzeSnapshotWithPriceHistory(
       ? {
           oiWall: positional.primarySupport.strike,
           oiStrength: positional.primarySupport.score,
-          ...buildConfluenceInfo(zones, positional.primarySupport.strike, 'support', liveSnapshot.atr14, liveSnapshot.strikeStep),
+          ...buildConfluenceInfo(
+            zones,
+            positional.primarySupport.strike,
+            'support',
+            liveSnapshot.spot,
+            liveSnapshot.atr14,
+            liveSnapshot.strikeStep,
+          ),
         }
       : null;
     const resistanceDetail = positional.primaryResistance
       ? {
           oiWall: positional.primaryResistance.strike,
           oiStrength: positional.primaryResistance.score,
-          ...buildConfluenceInfo(zones, positional.primaryResistance.strike, 'resistance', liveSnapshot.atr14, liveSnapshot.strikeStep),
+          ...buildConfluenceInfo(
+            zones,
+            positional.primaryResistance.strike,
+            'resistance',
+            liveSnapshot.spot,
+            liveSnapshot.atr14,
+            liveSnapshot.strikeStep,
+          ),
         }
       : null;
     currentConfluence = { support: supportDetail, resistance: resistanceDetail };
