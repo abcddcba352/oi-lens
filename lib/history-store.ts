@@ -6,6 +6,7 @@ import type { HistoricalLevelObservation, LevelFeatures, LevelSide, MarketSnapsh
 import type { MarketDataProvider } from './providers/types';
 import { HORIZON_SESSIONS, declarePrimaryWalls, evaluateFromHistory, aggregateWallStats, analyzeFeatureThresholds, tradingSessionsUntilExpiry } from './wall-backtest';
 import type { WallStats, FeatureThresholds } from './wall-backtest';
+import { MIN_SESSIONS_FOR_BASIC_ANALYSIS } from './instrument-availability';
 
 const DAY = 86_400_000;
 
@@ -242,7 +243,7 @@ export async function loadCachedPriceHistory(
       lte(marketSessions.sessionDate, end),
     ))
     .orderBy(asc(marketSessions.sessionDate));
-  if (rows.length < 20) return null;
+  if (rows.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS) return null;
   const history = rows.map((row) => ({
     date: row.sessionDate,
     open: row.open,
@@ -271,17 +272,17 @@ export async function loadOrRefreshPriceHistory(
     .where(and(eq(marketSessions.instrumentId, snapshot.symbol), gte(marketSessions.sessionDate, start), lte(marketSessions.sessionDate, end)))
     .orderBy(asc(marketSessions.sessionDate));
   const latest = existing.at(-1)?.sessionDate;
-  const fetchFrom = existing.length < 20 ? start : dateOffset(latest!, -REFRESH_OVERLAP_DAYS);
+  const fetchFrom = existing.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS ? start : dateOffset(latest!, -REFRESH_OVERLAP_DAYS);
   const fetched = await provider.fetchPriceHistory(snapshot.symbol, fetchFrom, end);
   await upsertSessions(snapshot.symbol, fetched);
   const rows = await db.select().from(marketSessions)
     .where(and(eq(marketSessions.instrumentId, snapshot.symbol), gte(marketSessions.sessionDate, start), lte(marketSessions.sessionDate, end)))
     .orderBy(asc(marketSessions.sessionDate));
   const history = rows.map((row) => ({ date: row.sessionDate, open: row.open, high: row.high, low: row.low, close: row.close }));
-  if (history.length < 20) throw new Error('FYERS returned too few daily sessions for six-month analysis.');
+  if (history.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS) throw new Error(`FYERS returned too few daily sessions (${history.length}) for analysis. At least ${MIN_SESSIONS_FOR_BASIC_ANALYSIS} are needed.`);
   return {
     history,
-    source: existing.length < 20 ? 'backfilled' : fetched.length ? 'incremental' : 'cache',
+    source: existing.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS ? 'backfilled' : fetched.length ? 'incremental' : 'cache',
     latestSession: history.at(-1)?.date ?? null,
   };
 }

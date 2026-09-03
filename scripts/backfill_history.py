@@ -1,11 +1,13 @@
-"""Build a D1 import from official NSE F&O UDiFF bhavcopies.
+"""Build a D1 import from official NSE F&O and Cash Market UDiFF bhavcopies.
 
-One end-of-day snapshot is retained for the nearest option expiry of every
-requested underlying. Only Python's standard library is required.
+Downloads both option chain snapshots and daily price sessions (OHLC + ATR14)
+directly from official NSE archives, storing them idempotently into Cloudflare D1.
+Only Python's standard library is required.
 
 Examples:
   python scripts/backfill_history.py --symbols RELIANCE,TCS,SBIN --days 183
   python scripts/backfill_history.py --symbols NIFTY,BANKNIFTY,INFY
+  python scripts/backfill_history.py --symbols ALL --days 7 --output nse_oi_update.sql
 """
 
 import argparse
@@ -34,7 +36,7 @@ DEFAULT_SYMBOLS = [
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) OI-Lens/1.0",
-    "Accept": "application/zip,application/octet-stream,*/*",
+    "Accept": "application/zip,application/octet-stream,text/csv,*/*",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
@@ -84,12 +86,7 @@ def infer_strike_step(strikes):
     return min(differences) if differences else 1.0
 
 
-def download_bhavcopy(trade_date):
-    date_string = trade_date.strftime("%Y%m%d")
-    url = (
-        "https://nsearchives.nseindia.com/content/fo/"
-        f"BhavCopy_NSE_FO_0_0_0_{date_string}_F_0000.csv.zip"
-    )
+def download_url(url):
     request = urllib.request.Request(url, headers=HEADERS)
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
@@ -97,27 +94,169 @@ def download_bhavcopy(trade_date):
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
-        print(f"Warning: NSE returned HTTP {error.code} for {trade_date}")
+        print(f"Warning: HTTP {error.code} for {url}")
     except Exception as error:
-        print(f"Warning: failed to download {trade_date}: {error}")
+        print(f"Warning: failed to download {url}: {error}")
     return None
 
 
-def process_csv(trade_date, zip_bytes, requested_tickers):
+def download_bhavcopy_fo(trade_date):
+    """Download official NSE F&O UDiFF bhavcopy."""
+    date_string = trade_date.strftime("%Y%m%d")
+    url = (
+        "https://nsearchives.nseindia.com/content/fo/"
+        f"BhavCopy_NSE_FO_0_0_0_{date_string}_F_0000.csv.zip"
+    )
+    return download_url(url)
+
+
+def download_bhavcopy_cm(trade_date):
+    """Download official NSE Cash Market (CM) bhavcopy."""
+    date_string = trade_date.strftime("%Y%m%d")
+    # Primary: UDiFF CM format (standard since July 2024)
+    url_udiff = (
+        "https://nsearchives.nseindia.com/content/cm/"
+        f"BhavCopy_NSE_CM_0_0_0_{date_string}_F_0000.csv.zip"
+    )
+    data = download_url(url_udiff)
+    if data:
+        return data
+
+    # Fallback: Legacy CM format
+    year = trade_date.strftime("%Y")
+    month_upper = trade_date.strftime("%b").upper()
+    day_string = trade_date.strftime("%d")
+    url_legacy = (
+        f"https://archives.nseindia.com/content/historical/EQUITIES/{year}/{month_upper}/"
+        f"cm{day_string}{month_upper}{year}bhav.csv.zip"
+    )
+    return download_url(url_legacy)
+
+
+def download_indices_daily(trade_date):
+    """Download official NSE daily indices summary (OHLC for NIFTY, BANKNIFTY, etc.)."""
+    date_dmy = trade_date.strftime("%d%m%Y")
+    url = f"https://nsearchives.nseindia.com/content/indices/ind_close_all_{date_dmy}.csv"
+    data = download_url(url)
+    if data:
+        return data
+
+    url_fallback = f"https://archives.nseindia.com/content/indices/ind_close_all_{date_dmy}.csv"
+    return download_url(url_fallback)
+
+
+def parse_cm_bhavcopy(zip_bytes, requested_tickers):
+    """Extract Open, High, Low, Close for common equity series ('EQ')."""
     if not zip_bytes:
-        return []
+        return {}
+    prices = {}
+    try:
+        with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
+            csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+            for name in csv_names:
+                content = archive.read(name).decode("utf-8-sig", errors="replace")
+                delimiter = "\t" if "\t" in content[:1000] else ","
+                reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
+                for row in reader:
+                    ticker = (row.get("TckrSymb") or row.get("SYMBOL") or "").strip().upper()
+                    series = (row.get("SctySrs") or row.get("SERIES") or "").strip().upper()
+                    if series != "EQ":
+                        continue
+                    if "ALL" not in requested_tickers and ticker not in requested_tickers:
+                        continue
+                    try:
+                        open_p = float(row.get("OpnPric") or row.get("OPEN") or 0)
+                        high_p = float(row.get("HghPric") or row.get("HIGH") or 0)
+                        low_p = float(row.get("LwPric") or row.get("LOW") or 0)
+                        close_p = float(row.get("ClsPric") or row.get("CLOSE") or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    if open_p > 0 and close_p > 0:
+                        instrument_id = f"NSE:{ticker}-EQ"
+                        prices[instrument_id] = {
+                            "open": open_p,
+                            "high": high_p if high_p > 0 else max(open_p, close_p),
+                            "low": low_p if low_p > 0 else min(open_p, close_p),
+                            "close": close_p,
+                        }
+    except Exception as err:
+        print(f"Warning: failed parsing CM bhavcopy: {err}")
+    return prices
+
+
+def parse_indices_csv(csv_bytes, requested_tickers):
+    """Extract Open, High, Low, Close for indices."""
+    if not csv_bytes:
+        return {}
+    prices = {}
+    try:
+        content = csv_bytes.decode("utf-8-sig", errors="replace")
+        delimiter = "\t" if "\t" in content[:1000] else ","
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
+        for row in reader:
+            name = (row.get("Index Name") or row.get("INDEX_NAME") or "").strip().lower()
+            if not name:
+                continue
+            matched_key = None
+            if "nifty 50" in name and "junior" not in name and "next" not in name:
+                matched_key = "NIFTY"
+            elif "nifty bank" in name:
+                matched_key = "BANKNIFTY"
+            elif "financial services" in name and "nifty" in name:
+                matched_key = "FINNIFTY"
+            elif "midcap select" in name or "mid select" in name:
+                matched_key = "MIDCPNIFTY"
+
+            if not matched_key:
+                continue
+            if "ALL" not in requested_tickers and matched_key not in requested_tickers:
+                continue
+
+            try:
+                open_p = float(row.get("Open Index Value") or row.get("Open") or row.get("OPEN") or 0)
+                high_p = float(row.get("High Index Value") or row.get("High") or row.get("HIGH") or 0)
+                low_p = float(row.get("Low Index Value") or row.get("Low") or row.get("LOW") or 0)
+                close_p = float(row.get("Closing Index Value") or row.get("Close") or row.get("CLOSE") or 0)
+            except (ValueError, TypeError):
+                continue
+
+            if close_p > 0:
+                instrument_id, _, _, _ = symbol_metadata(matched_key)
+                prices[instrument_id] = {
+                    "open": open_p if open_p > 0 else close_p,
+                    "high": high_p if high_p > 0 else max(open_p, close_p),
+                    "low": low_p if low_p > 0 else min(open_p, close_p),
+                    "close": close_p,
+                }
+    except Exception as err:
+        print(f"Warning: failed parsing indices csv: {err}")
+    return prices
+
+
+def process_fo_csv(trade_date, zip_bytes, requested_tickers):
+    if not zip_bytes:
+        return [], {}
 
     grouped = {}
+    underlying_spots = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as archive:
         csv_names = [name for name in archive.namelist() if name.lower().endswith(".csv")]
         for name in csv_names:
-            content = archive.read(name).decode("utf-8-sig")
+            content = archive.read(name).decode("utf-8-sig", errors="replace")
             delimiter = "\t" if "\t" in content[:1000] else ","
             for row in csv.DictReader(io.StringIO(content), delimiter=delimiter):
                 ticker = row.get("TckrSymb", "").strip().upper()
                 if "ALL" not in requested_tickers and ticker not in requested_tickers:
                     continue
                 option_type = row.get("OptnTp", "").strip().upper()
+                try:
+                    spot = float(row.get("UndrlygPric") or 0)
+                except (ValueError, TypeError):
+                    spot = 0.0
+
+                if spot > 0:
+                    underlying_spots[ticker] = spot
+
                 if option_type not in ("CE", "PE"):
                     continue
                 try:
@@ -126,7 +265,6 @@ def process_csv(trade_date, zip_bytes, requested_tickers):
                     oi = int(float(row.get("OpnIntrst") or 0))
                     oi_change = int(float(row.get("ChngInOpnIntrst") or 0))
                     volume = int(float(row.get("TtlTradgVol") or 0))
-                    spot = float(row.get("UndrlygPric") or 0)
                 except (KeyError, TypeError, ValueError):
                     continue
                 if strike <= 0 or oi < 0:
@@ -153,11 +291,10 @@ def process_csv(trade_date, zip_bytes, requested_tickers):
 
     records = []
     trade_date_iso = trade_date.strftime("%Y-%m-%d")
-    
-    if "ALL" in requested_tickers:
-        requested_tickers = set(item_ticker for item_ticker, _ in grouped.keys())
 
-    for ticker in requested_tickers:
+    actual_tickers = set(item_ticker for item_ticker, _ in grouped.keys()) if "ALL" in requested_tickers else requested_tickers
+
+    for ticker in actual_tickers:
         expiries = sorted(expiry for item_ticker, expiry in grouped if item_ticker == ticker)
         if not expiries:
             continue
@@ -185,22 +322,98 @@ def process_csv(trade_date, zip_bytes, requested_tickers):
                 ],
             }
         )
-    return records
+    return records, underlying_spots
 
 
 def download_and_process(trade_date, requested_tickers):
-    return trade_date, process_csv(trade_date, download_bhavcopy(trade_date), requested_tickers)
+    """Download F&O bhavcopy, Cash bhavcopy, and Indices summary for trade_date."""
+    trade_date_iso = trade_date.strftime("%Y-%m-%d")
+    fo_bytes = download_bhavcopy_fo(trade_date)
+    records, underlying_spots = process_fo_csv(trade_date, fo_bytes, requested_tickers)
+
+    cm_bytes = download_bhavcopy_cm(trade_date)
+    stock_prices = parse_cm_bhavcopy(cm_bytes, requested_tickers)
+
+    idx_bytes = download_indices_daily(trade_date)
+    index_prices = parse_indices_csv(idx_bytes, requested_tickers)
+
+    # Combine price sessions
+    daily_sessions = {}
+    # 1. Stock prices from CM Bhavcopy
+    for inst_id, ohlc in stock_prices.items():
+        daily_sessions[inst_id] = {
+            "date": trade_date_iso,
+            "open": ohlc["open"],
+            "high": ohlc["high"],
+            "low": ohlc["low"],
+            "close": ohlc["close"],
+        }
+
+    # 2. Index prices from Index Bhavcopy
+    for inst_id, ohlc in index_prices.items():
+        daily_sessions[inst_id] = {
+            "date": trade_date_iso,
+            "open": ohlc["open"],
+            "high": ohlc["high"],
+            "low": ohlc["low"],
+            "close": ohlc["close"],
+        }
+
+    # 3. Fallback for any instrument that had F&O records but missed CM/Index OHLC
+    for rec in records:
+        inst_id = rec["instrument_id"]
+        if inst_id not in daily_sessions and rec["spot"] > 0:
+            sp = rec["spot"]
+            daily_sessions[inst_id] = {
+                "date": trade_date_iso,
+                "open": sp,
+                "high": sp,
+                "low": sp,
+                "close": sp,
+            }
+
+    return trade_date, records, daily_sessions
+
+
+def compute_atr14_series(sessions):
+    """Compute Wilder's 14-period ATR across chronological daily sessions."""
+    if not sessions:
+        return []
+    trs = []
+    for i, s in enumerate(sessions):
+        h = s["high"]
+        l = s["low"]
+        if i == 0:
+            tr = max(h - l, 0.0)
+        else:
+            prev_c = sessions[i - 1]["close"]
+            tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+        trs.append(tr)
+
+    atrs = []
+    running_atr = 0.0
+    for i, tr in enumerate(trs):
+        if i < 14:
+            running_atr = sum(trs[:i + 1]) / (i + 1)
+        else:
+            running_atr = (running_atr * 13.0 + tr) / 14.0
+        atrs.append(round(running_atr, 2))
+
+    for s, atr in zip(sessions, atrs):
+        s["atr14"] = atr
+    return sessions
 
 
 def number(value):
     return str(int(value)) if float(value).is_integer() else str(value)
 
 
-def generate_sql(records):
+def generate_sql(records, sessions_by_instrument):
     statements = []
     latest_metadata = {record["instrument_id"]: record for record in records}
     generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
+    # 1. Instruments metadata
     for instrument_id, record in sorted(latest_metadata.items()):
         statements.append(
             "INSERT INTO instruments (id, symbol, display_name, instrument_type, strike_step, updated_at) VALUES "
@@ -210,6 +423,23 @@ def generate_sql(records):
             "instrument_type=excluded.instrument_type, strike_step=excluded.strike_step, updated_at=excluded.updated_at;"
         )
 
+    # 2. Daily Price Sessions (market_sessions) with ATR-14
+    for instrument_id, sessions in sorted(sessions_by_instrument.items()):
+        compute_atr14_series(sessions)
+        for s in sessions:
+            session_id = f"{instrument_id}:{s['date']}"
+            atr_val = number(s["atr14"]) if s.get("atr14") is not None else "NULL"
+            statements.append(
+                "INSERT INTO market_sessions (id, instrument_id, session_date, open, high, low, close, atr14, source) VALUES "
+                f"({sql_text(session_id)}, {sql_text(instrument_id)}, {sql_text(s['date'])}, "
+                f"{number(s['open'])}, {number(s['high'])}, {number(s['low'])}, {number(s['close'])}, "
+                f"{atr_val}, 'nse-bhavcopy') "
+                "ON CONFLICT(instrument_id, session_date) DO UPDATE SET "
+                "open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, "
+                "atr14=coalesce(excluded.atr14, market_sessions.atr14), source=excluded.source;"
+            )
+
+    # 3. OI Snapshots & Strikes
     for record in sorted(records, key=lambda item: (item["trade_date"], item["instrument_id"])):
         instrument_id = record["instrument_id"]
         expiry = record["expiry"]
@@ -244,11 +474,11 @@ def generate_sql(records):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Prepare official NSE EOD option OI for Cloudflare D1.")
+    parser = argparse.ArgumentParser(description="Prepare official NSE EOD option OI and daily price history for Cloudflare D1.")
     parser.add_argument(
         "--symbols",
         default=",".join(DEFAULT_SYMBOLS),
-        help="Comma-separated NSE F&O underlyings (default: tracked stocks)",
+        help="Comma-separated NSE F&O underlyings (default: tracked stocks, or ALL)",
     )
     parser.add_argument("--days", type=int, default=183, help="Calendar-day lookback (default: 183)")
     parser.add_argument("--workers", type=int, default=4, help="Parallel NSE downloads, 1-6 (default: 4)")
@@ -270,28 +500,42 @@ def main():
             dates.append(current)
         current += datetime.timedelta(days=1)
 
-    print(f"Downloading official NSE EOD OI for {', '.join(sorted(tickers))} ({len(dates)} weekdays)...")
+    print(f"Downloading official NSE EOD OI & daily price candles for {', '.join(sorted(tickers))} ({len(dates)} weekdays)...")
     records = []
+    sessions_by_instrument = {}
     workers = max(1, min(6, args.workers))
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = [executor.submit(download_and_process, date, tickers) for date in dates]
         for index, future in enumerate(as_completed(futures), start=1):
-            trade_date, day_records = future.result()
+            trade_date, day_records, day_sessions = future.result()
             records.extend(day_records)
-            print(f"[{index}/{len(dates)}] {trade_date}: {len(day_records)} symbols", end="\r")
+            for inst_id, session_data in day_sessions.items():
+                sessions_by_instrument.setdefault(inst_id, []).append(session_data)
+            print(f"[{index}/{len(dates)}] {trade_date}: {len(day_records)} OI symbols, {len(day_sessions)} price sessions", end="\r")
     print()
 
+    # Sort each instrument's sessions chronologically before writing
+    for inst_id in sessions_by_instrument:
+        sessions_by_instrument[inst_id].sort(key=lambda s: s["date"])
+
     output = Path(args.output)
-    statements = generate_sql(records)
+    statements = generate_sql(records, sessions_by_instrument)
     output.write_text("\n".join(statements), encoding="utf-8")
-    counts = {}
+
+    oi_counts = {}
     for record in records:
-        counts[record["instrument_id"]] = counts.get(record["instrument_id"], 0) + 1
+        oi_counts[record["instrument_id"]] = oi_counts.get(record["instrument_id"], 0) + 1
+
+    total_sessions = sum(len(s) for s in sessions_by_instrument.values())
     print(f"Generated {output.resolve()} with {len(statements)} idempotent statements.")
-    for instrument_id, count in sorted(counts.items()):
-        print(f"  {instrument_id}: {count} EOD snapshots")
-    if not records:
-        print("No matching NSE records found; the symbol may not have traded F&O contracts in this period.")
+    print(f"Total price sessions generated: {total_sessions}")
+    for instrument_id in sorted(set(list(oi_counts.keys()) + list(sessions_by_instrument.keys()))):
+        oi_c = oi_counts.get(instrument_id, 0)
+        sess_c = len(sessions_by_instrument.get(instrument_id, []))
+        print(f"  {instrument_id}: {oi_c} EOD snapshots, {sess_c} daily price sessions")
+
+    if not records and not sessions_by_instrument:
+        print("No matching NSE records found; symbols may not have traded in this period.")
 
 
 if __name__ == "__main__":

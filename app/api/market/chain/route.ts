@@ -21,6 +21,7 @@ import type { QuarterStats } from '@/lib/history-store';
 import { runModelComparison } from '@/lib/model-comparison';
 import { findConfirmedPivots, groupPivotsIntoZones, priceSRFeatures } from '@/lib/price-levels';
 import type { LevelSide, LevelFeatures } from '@/lib/market-types';
+import { MIN_SESSIONS_FOR_FULL_HISTORY, MIN_SESSIONS_FOR_BASIC_ANALYSIS } from '@/lib/instrument-availability';
 
 import { ensureDbSchema, getDb } from '@/db';
 import { instruments, oiSnapshots, oiStrikes } from '@/db/schema';
@@ -126,7 +127,7 @@ export async function GET(request: Request) {
         ? await loadCachedPriceHistory(symbol, dummySnapshot.asOf)
         : await loadOrRefreshPriceHistory(provider, dummySnapshot);
       if (!cached) {
-        throw new Error('Connect FYERS once to cache this instrument\'s daily history before backfilling OI walls.');
+        throw new Error(`No cached daily history for ${symbol}. Connect FYERS and refresh once to populate it.`);
       }
       await evaluatePendingWalls(symbol, cached.history);
 
@@ -149,17 +150,26 @@ export async function GET(request: Request) {
   try {
     const authorization = await readFyersAuthorization(request);
     const provider = getMarketProvider(authorization);
+    // For offline (demo provider), try the stored snapshot first
     const storedSnapshot = provider.id === 'demo'
       ? await loadLatestStoredSnapshot(symbol, expiryEpoch)
       : null;
+
+    // If offline and no stored snapshot exists, give a specific error
+    if (provider.id === 'demo' && !storedSnapshot) {
+      throw new Error('No saved OI snapshot for this stock. Connect FYERS and refresh once to archive one.');
+    }
+
     const snapshot = storedSnapshot
       ?? await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
     const cached = provider.id === 'demo' && snapshot.source !== 'demo'
       ? await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf)
       : await loadOrRefreshPriceHistory(provider, snapshot);
     if (!cached) {
-      throw new Error('Connect FYERS once to cache this instrument\'s daily history.');
+      throw new Error(`Only 0 cached daily sessions available for ${symbol}; at least ${MIN_SESSIONS_FOR_BASIC_ANALYSIS} are needed for basic analysis.`);
     }
+
+    const isFullHistory = cached.history.length >= MIN_SESSIONS_FOR_FULL_HISTORY;
 
     if (snapshot.spotChangePercent === 0 && cached.history.length >= 2) {
       const todayIso = snapshot.asOf.slice(0, 10);
@@ -231,8 +241,12 @@ export async function GET(request: Request) {
     }
 
     // ─── Model comparison (OI-only vs price-only vs hybrid) ────────────
+    // Requires full six-month history (≥100 sessions) for valid price S/R
+    // training/validation. Partial history would produce misleading results.
     let modelComparison = null;
-    try {
+    if (!isFullHistory) {
+      // Skip model comparison entirely — partial history cannot train reliably
+    } else try {
       const wallCount = (wallStats?.support.evaluated ?? 0) + (wallStats?.resistance.evaluated ?? 0);
       if (wallCount >= 10) {
         const enrichedObservations = await loadWallTrainingObservationsWithPrice(symbol);
@@ -308,6 +322,8 @@ export async function GET(request: Request) {
           storedOiSnapshots: oiCoverage.snapshots,
           earliestOiSnapshot: oiCoverage.firstSnapshot,
           latestOiSnapshot: oiCoverage.latestSnapshot,
+          partialHistory: !isFullHistory,
+          historyCoverage: isFullHistory ? 'full' as const : cached.history.length >= MIN_SESSIONS_FOR_BASIC_ANALYSIS ? 'partial' as const : 'none' as const,
         },
       },
       { headers: { 'Cache-Control': 'private, no-store, max-age=0' } },

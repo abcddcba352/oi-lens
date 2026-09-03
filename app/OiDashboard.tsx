@@ -197,8 +197,17 @@ const instruments = [
   ['NSE:ZYDUSLIFE-EQ', 'ZYDUSLIFE'],
 ] as const;
 
-type InstrumentOption = readonly [symbol: string, label: string];
-const indexFallback: InstrumentOption[] = instruments.slice(0, 4).map(([symbol, label]) => [symbol, label]);
+interface InstrumentOption {
+  symbol: string;
+  label: string;
+  availability: 'ready' | 'missing_snapshot' | 'insufficient_history';
+  reason: string | null;
+  sessions: number;
+  partialHistory: boolean;
+}
+const indexFallback: InstrumentOption[] = instruments.slice(0, 4).map(([symbol, label]) => ({
+  symbol, label, availability: 'ready' as const, reason: null, sessions: 999, partialHistory: false,
+}));
 
 interface DataStatus {
   historySource: 'backfilled' | 'incremental' | 'cache';
@@ -210,6 +219,8 @@ interface DataStatus {
   storedOiSnapshots: number;
   earliestOiSnapshot: string | null;
   latestOiSnapshot: string | null;
+  partialHistory: boolean;
+  historyCoverage: 'full' | 'partial' | 'none';
 }
 
 type DashboardAnalysis = MarketAnalysis & { featureThresholds?: FeatureThresholds };
@@ -230,20 +241,33 @@ interface ChainPayload {
 }
 
 interface InstrumentsPayload {
-  instruments?: Array<{ symbol: string; label: string; instrumentType: 'index' | 'stock'; snapshots: number }>;
+  instruments?: Array<{
+    symbol: string;
+    label: string;
+    instrumentType: 'index' | 'stock';
+    snapshots: number;
+    sessions: number;
+    availability: 'ready' | 'missing_snapshot' | 'insufficient_history';
+    historyCoverage: 'full' | 'partial' | 'none';
+    partialHistory: boolean;
+    reason: string | null;
+  }>;
   error?: string;
 }
+
 
 function SymbolSearch({
   value,
   options,
   onSelect,
   onInvalid,
+  fyersConnected,
 }: {
   value: string;
   options: InstrumentOption[];
   onSelect: (sym: string) => void;
   onInvalid: (value: string) => void;
+  fyersConnected: boolean;
 }) {
   const [query, setQuery] = useState(value);
   const [open, setOpen] = useState(false);
@@ -251,7 +275,7 @@ function SymbolSearch({
 
   const q = query.trim().toUpperCase();
   const filtered = q.length === 0 ? options.slice(0, 12) : options.filter(
-    ([sym, label]) => label.includes(q) || sym.includes(q)
+    (opt) => opt.label.includes(q) || opt.symbol.includes(q)
   ).slice(0, 12);
 
   function pick(sym: string, label: string) {
@@ -261,11 +285,12 @@ function SymbolSearch({
   }
 
   function analyze() {
-    // If user typed a raw short ticker like "TCS" and the first match is exact, use that
     if (filtered.length > 0) {
-      const exact = filtered.find(([, label]) => label === q);
+      const exact = filtered.find((opt) => opt.label === q);
       const use = exact ?? filtered[0];
-      pick(use[0], use[1]);
+      const disabled = !fyersConnected && use.availability !== 'ready';
+      if (disabled) return;
+      pick(use.symbol, use.label);
     } else {
       onInvalid(query);
       setOpen(false);
@@ -306,18 +331,25 @@ function SymbolSearch({
           />
           {open && filtered.length > 0 && (
             <ul className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-card shadow-xl">
-              {filtered.map(([sym, label]) => (
-                <li key={sym}>
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
-                    onMouseDown={(e) => { e.preventDefault(); pick(sym, label); }}
-                  >
-                    <span className="font-bold">{label}</span>
-                    <span className="ml-auto font-mono text-[11px] text-muted-foreground">{sym.replace('NSE:', '').replace(/-(EQ|INDEX)$/, '')}</span>
-                  </button>
-                </li>
-              ))}
+              {filtered.map((opt) => {
+                const disabled = !fyersConnected && opt.availability !== 'ready';
+                return (
+                  <li key={opt.symbol}>
+                    <button
+                      type="button"
+                      disabled={disabled}
+                      className={`flex w-full items-center gap-3 px-3 py-2 text-left text-sm ${disabled ? 'cursor-not-allowed opacity-50' : 'hover:bg-accent hover:text-accent-foreground'}`}
+                      onMouseDown={(e) => { e.preventDefault(); if (!disabled) pick(opt.symbol, opt.label); }}
+                    >
+                      <span className="font-bold">{opt.label}</span>
+                      {disabled && opt.reason && (
+                        <span className="ml-1 truncate text-[10px] text-amber-400/80">{opt.reason}</span>
+                      )}
+                      <span className="ml-auto font-mono text-[11px] text-muted-foreground">{opt.symbol.replace('NSE:', '').replace(/-(EQ|INDEX)$/, '')}</span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -325,7 +357,14 @@ function SymbolSearch({
           <Search data-icon="inline-start" />Analyze
         </Button>
       </div>
-      <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Only supported NSE indices and F&amp;O stocks with saved OI data are listed.</span>
+      {!fyersConnected && (
+        <span className="text-[10px] font-medium normal-case tracking-normal text-amber-400/80">
+          <PlugZap className="mr-1 inline size-3" />FYERS disconnected — only instruments with cached OI and history are available.
+        </span>
+      )}
+      {fyersConnected && (
+        <span className="text-[10px] font-medium normal-case tracking-normal text-muted-foreground">Only supported NSE indices and F&amp;O stocks with saved OI data are listed.</span>
+      )}
     </div>
   );
 }
@@ -357,7 +396,14 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       .then((response) => response.json() as Promise<InstrumentsPayload>)
       .then((payload) => {
         if (!payload.instruments?.length) return;
-        setInstrumentOptions(payload.instruments.map((item) => [item.symbol, item.label]));
+        setInstrumentOptions(payload.instruments.map((item) => ({
+          symbol: item.symbol,
+          label: item.label,
+          availability: item.availability,
+          reason: item.reason,
+          sessions: item.sessions,
+          partialHistory: item.partialHistory,
+        })));
       })
       .catch(() => undefined);
     void fetch('/api/auth/fyers/status', { cache: 'no-store' })
@@ -550,6 +596,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             key={symbol}
             value={symbol}
             options={instrumentOptions}
+            fyersConnected={fyers.connected}
             onSelect={(sym) => { setSymbol(sym); void load(sym); }}
             onInvalid={(value) => setError(`${value || 'That symbol'} is not in the supported NSE index/F&O list with saved OI data.`)}
           />
@@ -741,11 +788,24 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
           </section>
         )}
 
+        {/* ─── Partial history warning ─────────────────────────────────── */}
+        {dataStatus?.partialHistory && (
+          <section className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-amber-300">
+              <TriangleAlert className="size-4" />
+              Partial history ({dataStatus.historySessions} sessions)
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              OI levels are available. Price S/R confluence and model comparison require at least 100 sessions.
+            </p>
+          </section>
+        )}
+
         {/* ─── Model Comparison ──────────────────────────────────────────── */}
-        <ModelComparisonSection comparison={modelComparison} />
+        {!dataStatus?.partialHistory && <ModelComparisonSection comparison={modelComparison} />}
 
         {/* ─── Current OI / Price S/R Confluence ────────────────────────── */}
-        <ConfluenceSection confluence={analysis.currentConfluence} />
+        {!dataStatus?.partialHistory && <ConfluenceSection confluence={analysis.currentConfluence} />}
 
       </div>
     </main>
