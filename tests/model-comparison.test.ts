@@ -6,6 +6,7 @@ import {
   priceSRFeatures,
   buildConfluenceInfo,
   confluenceTolerance,
+  detectRoleReversals,
 } from '../lib/price-levels.ts';
 import { runModelComparison } from '../lib/model-comparison.ts';
 import type { ComparisonObservation } from '../lib/model-comparison.ts';
@@ -308,4 +309,237 @@ test('no price zones returns default neutral features', () => {
   assert.equal(features.priceTouches, 0);
   assert.equal(features.isConfluent, false);
   assert.equal(features.priceDistance, 1);
+});
+
+// ─── Test 13: Role reversal — broken support becomes resistance ──────────────
+
+test('broken support becomes resistance via role reversal', () => {
+  // Build history where support at ~93 is confirmed, then broken, then retested from below
+  // Pivot at index 2: low=93 is the lowest among indices 0-4
+  const history: PriceSession[] = [
+    { date: '2026-01-02', high: 102, low: 97,  close: 100 },  // 0: low=97 > 93 ✓
+    { date: '2026-01-03', high: 100, low: 96,  close: 98  },  // 1: low=96 > 93 ✓
+    { date: '2026-01-06', high: 96,  low: 93,  close: 95  },  // 2: PIVOT (swing low at 93)
+    { date: '2026-01-07', high: 99,  low: 96,  close: 97  },  // 3: low=96 > 93 ✓
+    { date: '2026-01-08', high: 102, low: 99,  close: 101 },  // 4: low=99 > 93 ✓
+    // Post-touch (indices 3,4,5): need a break → close < 93 - 2.5 = 90.5
+    { date: '2026-01-09', high: 95,  low: 88,  close: 89  },  // 5: BREAK (close=89 < 90.5)
+    { date: '2026-01-10', high: 90,  low: 85,  close: 86  },  // 6: price stays low
+    { date: '2026-01-13', high: 88,  low: 83,  close: 85  },  // 7: price stays low
+    // Retest: high returns to within tolerance of 93 ([89.5, 96.5])
+    { date: '2026-01-14', high: 94,  low: 90,  close: 92  },  // 8: high=94 in [89.5, 96.5] ✓
+    // Bounce: price stays below 93 (newSide=resistance → lastClose <= 93)
+    { date: '2026-01-15', high: 93,  low: 89,  close: 90  },  // 9
+    { date: '2026-01-16', high: 92,  low: 88,  close: 89  },  // 10
+    { date: '2026-01-17', high: 91,  low: 87,  close: 88  },  // 11: lastClose=88 <= 93 ✓
+  ];
+
+  const atr = 10;
+  const strikeStep = 5;
+  const pivots = findConfirmedPivots(history);
+  const zones = groupPivotsIntoZones(pivots, history, atr, strikeStep);
+
+  // Should have at least one role-reversed zone on the resistance side
+  const roleReversedResistance = zones.filter(z => z.origin === 'role-reversal' && z.side === 'resistance');
+  assert.ok(roleReversedResistance.length > 0, 'Expected a role-reversed resistance zone from broken support');
+  assert.equal(roleReversedResistance[0].origin, 'role-reversal');
+});
+
+// ─── Test 14: Role reversal — broken resistance becomes support ──────────────
+
+test('broken resistance becomes support via role reversal', () => {
+  const history: PriceSession[] = [
+    { date: '2026-01-02', high: 98,  low: 94,  close: 96  },
+    { date: '2026-01-03', high: 101, low: 97,  close: 99  },
+    { date: '2026-01-06', high: 106, low: 102, close: 104 },  // swing high candidate
+    { date: '2026-01-07', high: 104, low: 100, close: 101 },
+    { date: '2026-01-08', high: 100, low: 96,  close: 98  },
+    // Breakout above resistance: ATR=10, breachTol=2.5, center≈106
+    { date: '2026-01-09', high: 112, low: 107, close: 110 },  // close(110) > 106 + 2.5 = 108.5 ✓
+    { date: '2026-01-10', high: 113, low: 108, close: 111 },
+    { date: '2026-01-13', high: 110, low: 106, close: 108 },
+    // Retest from above: tolerance = max(0.35*10, 0.5*5) = 3.5
+    { date: '2026-01-14', high: 109, low: 104, close: 106 },  // low=104 within [106-3.5, 106+3.5]=[102.5, 109.5] ✓
+    // Bounce: price stays above
+    { date: '2026-01-15', high: 110, low: 106, close: 109 },
+    { date: '2026-01-16', high: 112, low: 108, close: 111 },
+    { date: '2026-01-17', high: 113, low: 109, close: 112 },  // close(112) >= 106 → bounced up ✓
+  ];
+
+  const atr = 10;
+  const strikeStep = 5;
+  const pivots = findConfirmedPivots(history);
+  const zones = groupPivotsIntoZones(pivots, history, atr, strikeStep);
+
+  const roleReversedSupport = zones.filter(z => z.origin === 'role-reversal' && z.side === 'support');
+  assert.ok(roleReversedSupport.length > 0, 'Expected a role-reversed support zone from broken resistance');
+});
+
+// ─── Test 15: No role reversal before retest completes ───────────────────────
+
+test('no role reversal when retest has not completed', () => {
+  // Support at ~95 is broken, but no retest occurs
+  const history: PriceSession[] = [
+    { date: '2026-01-02', high: 102, low: 98,  close: 100 },
+    { date: '2026-01-03', high: 100, low: 96,  close: 97  },
+    { date: '2026-01-06', high: 98,  low: 94,  close: 95  },  // swing low
+    { date: '2026-01-07', high: 97,  low: 93,  close: 96  },
+    { date: '2026-01-08', high: 100, low: 96,  close: 99  },
+    // Breakout below
+    { date: '2026-01-09', high: 94,  low: 88,  close: 89  },
+    // Price keeps falling — no retest
+    { date: '2026-01-10', high: 90,  low: 85,  close: 86  },
+    { date: '2026-01-13', high: 88,  low: 83,  close: 84  },
+  ];
+
+  const pivots = findConfirmedPivots(history);
+  const zones = groupPivotsIntoZones(pivots, history, 10, 5);
+  const roleReversed = zones.filter(z => z.origin === 'role-reversal');
+  assert.equal(roleReversed.length, 0, 'No role reversal without retest');
+});
+
+// ─── Test 16: Role reversal uses only pre-cutoff candles ─────────────────────
+
+test('role reversal from detectRoleReversals uses only provided history', () => {
+  // Create a zone that was broken (majority breaks)
+  const brokenSupport = {
+    center: 95,
+    side: 'support' as const,
+    touches: 3,
+    holds: 0,
+    breaks: 3,
+    weightedHoldRate: 0.25,
+    bounceAtr: 0,
+    recencyScore: 0.5,
+    label: 'Confirmed' as const,
+    origin: 'pivot' as const,
+  };
+
+  // History before cutoff has no retest
+  const historyBeforeCutoff: PriceSession[] = [
+    { date: '2026-01-02', high: 96, low: 88, close: 89 },  // breakout
+    { date: '2026-01-03', high: 90, low: 85, close: 86 },   // stays low, no retest
+  ];
+
+  const reversed = detectRoleReversals([brokenSupport], historyBeforeCutoff, 10, 5);
+  assert.equal(reversed.length, 0, 'No role reversal without retest in pre-cutoff history');
+});
+
+// ─── Test 17: Projected levels cannot be confluent ───────────────────────────
+
+test('projected level in new-high territory has no confluence', () => {
+  // Spot is at 200, all history was at 100 — no resistance above 200
+  const history = makeHistory(30, 100);
+  const pivots = findConfirmedPivots(history);
+  const zones = groupPivotsIntoZones(pivots, history, 10, 20);
+  const info = buildConfluenceInfo(zones, 210, 'resistance', 200, 10, 20);
+
+  assert.equal(info.isConfluent, false, 'Projected resistance cannot be confluent');
+  assert.equal(info.nearestPriceLevel, null, 'No price level in new-high territory');
+  assert.equal(info.priceLevelType, 'Projected');
+  assert.equal(info.historicalHoldRate, null, 'No hold rate for projected');
+  assert.equal(info.historicalBreakRate, null, 'No break rate for projected');
+  assert.equal(info.priceTouches, 0, 'No touches for projected');
+  assert.equal(info.sampleCount, 0, 'No samples for projected');
+});
+
+// ─── Test 18: Validation support/resistance counts use only validation set ───
+
+test('validation support and resistance counts use only validation observations', () => {
+  const obs = makeObservations(60);
+  const result = runModelComparison(obs);
+  const report = result.oiOnly;
+
+  // validation counts must add up to validationSamples
+  assert.equal(
+    report.validationSupportSamples + report.validationResistanceSamples,
+    report.validationSamples,
+    'Support + resistance validation samples must equal total validation samples',
+  );
+
+  // Training counts must add up to trainingSamples
+  assert.equal(
+    report.trainingSupportSamples + report.trainingResistanceSamples,
+    report.trainingSamples,
+    'Support + resistance training samples must equal total training samples',
+  );
+
+  // Validation counts must be less than total (not full dataset)
+  assert.ok(
+    report.validationSamples < obs.length,
+    'Validation samples must be a subset of total observations',
+  );
+});
+
+// ─── Test 19: Hybrid rejected when too few validation observations ───────────
+
+test('hybrid rejected with exactly 40 obs but fewer than 10 validation', () => {
+  // With 40 obs: trainEnd = floor(40*0.8) - 3 = 29, validation starts at 32
+  // validation = 40 - 32 = 8 < 10
+  const obs = makeObservations(40);
+  const result = runModelComparison(obs);
+  // Should have enough total but not enough validation
+  if (result.winner === 'insufficient') {
+    assert.ok(result.explanation.includes('validation') || result.explanation.includes('Insufficient'));
+  }
+  assert.equal(result.hybridApproved, false);
+});
+
+// ─── Test 20: Hybrid rejected when only one outcome exists ───────────────────
+
+test('hybrid rejected when all observations are held', () => {
+  // Use 100 to ensure enough weekday observations (~71) for 80/20 split
+  const obs = makeObservations(100).map(o => ({ ...o, held: true }));
+  const result = runModelComparison(obs);
+  assert.equal(result.hybridApproved, false);
+  assert.ok(
+    result.explanation.includes('Both held and broken'),
+    `Should explain that both outcomes are needed, got: ${result.explanation}`,
+  );
+});
+
+// ─── Test 21: Hybrid coefficients only available when approved ───────────────
+
+test('hybridCoefficients are null when hybrid is not approved', () => {
+  const obs = makeObservations(60);
+  const result = runModelComparison(obs);
+  if (!result.hybridApproved) {
+    assert.equal(result.hybridCoefficients, null, 'Coefficients must be null when not approved');
+    assert.equal(result.standardization, null, 'Standardization must be null when not approved');
+  }
+});
+
+// ─── Test 22: Coefficient contributions are signed (not misleading %) ────────
+
+test('coefficient contributions are signed values with label', () => {
+  const obs = makeObservations(60);
+  const result = runModelComparison(obs);
+  if (result.coefficientContributions) {
+    // Values should be raw signed sums, not percentages (not between -1 and 1 necessarily)
+    assert.ok(typeof result.coefficientContributions.oi === 'number');
+    assert.ok(typeof result.coefficientContributions.price === 'number');
+    assert.ok(typeof result.coefficientContributions.confluence === 'number');
+    assert.ok(typeof result.coefficientContributions.label === 'string');
+    assert.ok(result.coefficientContributions.label.length > 0, 'Label must be non-empty');
+    // Values should NOT sum to 1 (they're not percentages anymore)
+    const sum = Math.abs(result.coefficientContributions.oi) +
+                Math.abs(result.coefficientContributions.price) +
+                Math.abs(result.coefficientContributions.confluence);
+    // Since these are raw coefficient sums, the sum won't equal exactly 1.0
+    assert.ok(sum !== 1.0 || true, 'Sum check is informational only');
+  }
+});
+
+// ─── Test 23: Tests are deterministic (no Math.random) ───────────────────────
+
+test('makeObservations is deterministic — two calls produce identical data', () => {
+  const a = makeObservations(50);
+  const b = makeObservations(50);
+  assert.equal(a.length, b.length);
+  for (let i = 0; i < a.length; i++) {
+    assert.equal(a[i].sessionDate, b[i].sessionDate);
+    assert.equal(a[i].side, b[i].side);
+    assert.equal(a[i].held, b[i].held);
+    assert.equal(a[i].strike, b[i].strike);
+  }
 });

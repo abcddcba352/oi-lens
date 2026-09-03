@@ -19,6 +19,8 @@ import {
 } from '@/lib/history-store';
 import type { QuarterStats } from '@/lib/history-store';
 import { runModelComparison } from '@/lib/model-comparison';
+import { findConfirmedPivots, groupPivotsIntoZones, priceSRFeatures } from '@/lib/price-levels';
+import type { LevelSide, LevelFeatures } from '@/lib/market-types';
 
 import { ensureDbSchema, getDb } from '@/db';
 import { instruments, oiSnapshots, oiStrikes } from '@/db/schema';
@@ -238,6 +240,50 @@ export async function GET(request: Request) {
           const comparison = runModelComparison(enrichedObservations);
           modelComparison = comparison;
           analysis.modelComparison = comparison;
+
+          // ─── Hybrid confidence: apply trained model to current levels ───
+          // Only when ALL gates pass and confluence exists.
+          // Uses training-fitted coefficients and training-only standardisation.
+          // NEVER replaces OI Strength; displayed separately as Validated Hybrid Confidence.
+          if (comparison.hybridApproved && comparison.hybridCoefficients && comparison.standardization && analysis.currentConfluence) {
+            const { weights, bias } = comparison.hybridCoefficients;
+            const std = comparison.standardization;
+            const snap = analysis.snapshot;
+
+            const computeHybrid = (side: LevelSide, level: { strike: number; score: number; features: LevelFeatures }) => {
+              // Build the same 12-feature vector used during training
+              const pivots = findConfirmedPivots(cached.history.filter(s => s.date < snap.asOf.slice(0, 10)));
+              const zones = groupPivotsIntoZones(pivots, cached.history.filter(s => s.date < snap.asOf.slice(0, 10)), snap.atr14, snap.strikeStep);
+              const priceF = priceSRFeatures(zones, level.strike, side, snap.atr14, snap.strikeStep, snap.spot);
+
+              const raw = [
+                level.features.clusterOi, level.features.oiChange, level.features.volumeConfirmation,
+                level.features.proximity, level.features.persistence, level.features.regimeFit,
+                priceF.priceHoldRate, priceF.priceTouches, priceF.priceBounceAtr,
+                priceF.priceRecency, priceF.priceDistance, priceF.isConfluent ? 1 : 0,
+              ];
+
+              // Apply training-only z-score standardisation
+              const standardised = raw.map((val, j) => (val - std.means[j]) / std.stds[j]);
+
+              // Sigmoid(w·x + b)
+              let z = bias;
+              for (let j = 0; j < weights.length; j++) z += weights[j] * standardised[j];
+              const prob = z >= 0 ? 1 / (1 + Math.exp(-z)) : Math.exp(z) / (1 + Math.exp(z));
+              return Math.round(prob * 100) / 100;
+            };
+
+            try {
+              if (analysis.currentConfluence.support && analysis.positional.primarySupport) {
+                analysis.currentConfluence.support.hybridConfidence = computeHybrid('support', analysis.positional.primarySupport);
+              }
+              if (analysis.currentConfluence.resistance && analysis.positional.primaryResistance) {
+                analysis.currentConfluence.resistance.hybridConfidence = computeHybrid('resistance', analysis.positional.primaryResistance);
+              }
+            } catch {
+              // Hybrid confidence is non-critical
+            }
+          }
         }
       }
     } catch {

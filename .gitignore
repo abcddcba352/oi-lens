@@ -42,3 +42,7 @@ __pycache__/
 nse_oi_backfill.sql
 nse_oi_update.sql
 backfill_data.sql
+
+# generated docs and browser profiles
+docs/chrome-pdf-profile/
+docs/*.pdf

@@ -837,22 +837,28 @@ function ModelComparisonSection({ comparison }: { comparison: ModelComparisonRep
 
       {comparison.coefficientContributions && (
         <div className="mt-4 rounded-xl border border-border/60 bg-background/55 p-4">
-          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Learned Contributions (Hybrid)</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-muted-foreground">Directional Learned Influence (Hybrid)</p>
           <div className="mt-2 grid grid-cols-3 gap-3 text-center">
             <div>
               <p className="text-xs font-bold text-sky-300">OI Features</p>
-              <p className="mt-1 font-mono text-lg font-black">{(comparison.coefficientContributions.oi * 100).toFixed(0)}%</p>
+              <p className={`mt-1 font-mono text-lg font-black ${comparison.coefficientContributions.oi >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {comparison.coefficientContributions.oi >= 0 ? '+' : ''}{comparison.coefficientContributions.oi.toFixed(2)}
+              </p>
             </div>
             <div>
               <p className="text-xs font-bold text-amber-300">Price Features</p>
-              <p className="mt-1 font-mono text-lg font-black">{(comparison.coefficientContributions.price * 100).toFixed(0)}%</p>
+              <p className={`mt-1 font-mono text-lg font-black ${comparison.coefficientContributions.price >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {comparison.coefficientContributions.price >= 0 ? '+' : ''}{comparison.coefficientContributions.price.toFixed(2)}
+              </p>
             </div>
             <div>
               <p className="text-xs font-bold text-violet-300">Confluence</p>
-              <p className="mt-1 font-mono text-lg font-black">{(comparison.coefficientContributions.confluence * 100).toFixed(0)}%</p>
+              <p className={`mt-1 font-mono text-lg font-black ${comparison.coefficientContributions.confluence >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                {comparison.coefficientContributions.confluence >= 0 ? '+' : ''}{comparison.coefficientContributions.confluence.toFixed(2)}
+              </p>
             </div>
           </div>
-          <p className="mt-2 text-[10px] text-muted-foreground">Contributions derived from normalised hybrid model coefficients. Negative coefficients indicate inverse relationships.</p>
+          <p className="mt-2 text-[10px] text-muted-foreground">{comparison.coefficientContributions.label}</p>
         </div>
       )}
 
@@ -889,7 +895,7 @@ function ModelCard({ label, report, isWinner, color }: { label: string; report: 
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-muted-foreground">Validation</span>
-          <span className="font-mono text-muted-foreground">{report.validationSamples} obs</span>
+          <span className="font-mono text-muted-foreground">{report.validationSamples} obs ({report.validationSupportSamples}S / {report.validationResistanceSamples}R)</span>
         </div>
         <div className="flex justify-between text-xs">
           <span className="text-muted-foreground">Status</span>
@@ -987,6 +993,15 @@ function ConfluenceCard({ detail, side }: { detail: ConfluenceDetail; side: 'sup
               <span className="font-mono text-muted-foreground">{detail.sampleCount}</span>
             </div>
           </>
+        )}
+        {detail.hybridConfidence != null && (
+          <div className="mt-2 rounded-lg border border-violet-400/20 bg-violet-400/[0.06] p-2.5">
+            <div className="flex justify-between text-xs">
+              <span className="font-bold text-violet-300">Validated Hybrid Confidence</span>
+              <span className="font-mono text-sm font-black text-violet-200">{(detail.hybridConfidence * 100).toFixed(0)}%</span>
+            </div>
+            <p className="mt-1 text-[9px] text-muted-foreground">Based on historical training data. Not an exact success probability.</p>
+          </div>
         )}
       </div>
     </article>

@@ -33,7 +33,9 @@ export interface ComparisonResult {
   hybrid: ModelReport;
   winner: 'oi' | 'price' | 'hybrid' | 'insufficient';
   hybridApproved: boolean;
-  coefficientContributions: { oi: number; price: number; confluence: number } | null;
+  coefficientContributions: { oi: number; price: number; confluence: number; label: string } | null;
+  hybridCoefficients: { weights: number[]; bias: number } | null;
+  standardization: { means: number[]; stds: number[] } | null;
   explanation: string;
 }
 
@@ -177,6 +179,43 @@ function computeMetrics(
   };
 }
 
+// ─── Training-only standardization ───────────────────────────────────────────
+
+interface StandardizationParams {
+  means: number[];
+  stds: number[];
+}
+
+/**
+ * Compute z-score standardisation parameters from training data ONLY.
+ * Zero-variance features use std = 1.0 to prevent NaN/Infinity.
+ */
+function computeStandardization(features: number[][]): StandardizationParams {
+  if (features.length === 0) return { means: [], stds: [] };
+  const dim = features[0].length;
+  const means: number[] = Array.from({ length: dim }, () => 0);
+  const stds: number[] = Array.from({ length: dim }, () => 1);
+
+  for (let j = 0; j < dim; j++) {
+    let sum = 0;
+    for (const row of features) sum += row[j];
+    means[j] = sum / features.length;
+
+    let variance = 0;
+    for (const row of features) variance += (row[j] - means[j]) ** 2;
+    variance /= Math.max(1, features.length - 1);
+    stds[j] = Math.sqrt(variance) || 1.0; // fallback 1.0 for zero-variance
+  }
+  return { means, stds };
+}
+
+/** Apply z-score standardisation using pre-computed parameters. */
+function standardize(features: number[][], params: StandardizationParams): number[][] {
+  return features.map((row) =>
+    row.map((val, j) => (val - params.means[j]) / params.stds[j]),
+  );
+}
+
 // ─── Main comparison ─────────────────────────────────────────────────────────
 
 /**
@@ -203,6 +242,8 @@ export function runModelComparison(
     winner: 'insufficient',
     hybridApproved: false,
     coefficientContributions: null,
+    hybridCoefficients: null,
+    standardization: null,
     explanation: `Insufficient data: ${n} tested wall${n === 1 ? '' : 's'} available, need at least ${MIN_TOTAL_SAMPLES}. Current OI-based model remains active.`,
   };
 
@@ -234,47 +275,61 @@ export function runModelComparison(
     };
   }
 
-  // Extract feature arrays
-  const trainOi = train.map((o) => oiFeatureVector(o.oiFeatures));
-  const trainPrice = train.map((o) => priceFeatureVector(o.priceFeatures));
-  const trainHybrid = train.map((o) => hybridFeatureVector(o.oiFeatures, o.priceFeatures));
+  // Extract raw feature arrays
+  const trainOiRaw = train.map((o) => oiFeatureVector(o.oiFeatures));
+  const trainPriceRaw = train.map((o) => priceFeatureVector(o.priceFeatures));
+  const trainHybridRaw = train.map((o) => hybridFeatureVector(o.oiFeatures, o.priceFeatures));
   const trainLabels = train.map((o) => o.held);
 
-  const valOi = validation.map((o) => oiFeatureVector(o.oiFeatures));
-  const valPrice = validation.map((o) => priceFeatureVector(o.priceFeatures));
-  const valHybrid = validation.map((o) => hybridFeatureVector(o.oiFeatures, o.priceFeatures));
+  const valOiRaw = validation.map((o) => oiFeatureVector(o.oiFeatures));
+  const valPriceRaw = validation.map((o) => priceFeatureVector(o.priceFeatures));
+  const valHybridRaw = validation.map((o) => hybridFeatureVector(o.oiFeatures, o.priceFeatures));
   const valLabels = validation.map((o) => o.held);
 
-  // Fit three models
+  // Compute standardisation from TRAINING data only
+  const oiStd = computeStandardization(trainOiRaw);
+  const priceStd = computeStandardization(trainPriceRaw);
+  const hybridStd = computeStandardization(trainHybridRaw);
+
+  // Apply training-derived standardisation to both train and validation
+  const trainOi = standardize(trainOiRaw, oiStd);
+  const trainPrice = standardize(trainPriceRaw, priceStd);
+  const trainHybrid = standardize(trainHybridRaw, hybridStd);
+  const valOi = standardize(valOiRaw, oiStd);
+  const valPrice = standardize(valPriceRaw, priceStd);
+  const valHybrid = standardize(valHybridRaw, hybridStd);
+
+  // Fit three models on standardised features
   const oiModel = fitLogistic(trainOi, trainLabels);
   const priceModel = fitLogistic(trainPrice, trainLabels);
   const hybridModel = fitLogistic(trainHybrid, trainLabels);
 
-  // Validate
+  // Validate on standardised features
   const oiMetrics = computeMetrics(oiModel, valOi, valLabels);
   const priceMetrics = computeMetrics(priceModel, valPrice, valLabels);
   const hybridMetrics = computeMetrics(hybridModel, valHybrid, valLabels);
 
-  // Build reports
+  // Build reports — sample counts from validation set, not full dataset
   const buildReport = (
     metrics: { balancedAccuracy: number; brierScore: number },
-    trainN: number,
-    valN: number,
-    obs: ComparisonObservation[],
+    trainObs: ComparisonObservation[],
+    valObs: ComparisonObservation[],
   ): ModelReport => ({
-    trainingSamples: trainN,
-    validationSamples: valN,
+    trainingSamples: trainObs.length,
+    validationSamples: valObs.length,
     balancedAccuracy: metrics.balancedAccuracy,
     brierScore: metrics.brierScore,
-    holdRate: obs.filter((o) => o.held).length / Math.max(1, obs.length),
-    supportSamples: obs.filter((o) => o.side === 'support').length,
-    resistanceSamples: obs.filter((o) => o.side === 'resistance').length,
+    holdRate: valObs.filter((o) => o.held).length / Math.max(1, valObs.length),
+    trainingSupportSamples: trainObs.filter((o) => o.side === 'support').length,
+    trainingResistanceSamples: trainObs.filter((o) => o.side === 'resistance').length,
+    validationSupportSamples: valObs.filter((o) => o.side === 'support').length,
+    validationResistanceSamples: valObs.filter((o) => o.side === 'resistance').length,
     status: 'calibrated',
   });
 
-  const oiReport = buildReport(oiMetrics, train.length, validation.length, sorted);
-  const priceReport = buildReport(priceMetrics, train.length, validation.length, sorted);
-  const hybridReport = buildReport(hybridMetrics, train.length, validation.length, sorted);
+  const oiReport = buildReport(oiMetrics, train, validation);
+  const priceReport = buildReport(priceMetrics, train, validation);
+  const hybridReport = buildReport(hybridMetrics, train, validation);
 
   // Safety gates for hybrid adoption
   const brierImprovesOverOi = (oiMetrics.brierScore - hybridMetrics.brierScore) >= BRIER_IMPROVEMENT_THRESHOLD;
@@ -295,36 +350,35 @@ export function runModelComparison(
     winner = 'price';
   }
 
-  // Learned coefficient contributions (normalised from hybrid model)
+  // Learned coefficient contributions (directional signed influence from hybrid)
+  //
+  // After standardisation, coefficients are on comparable scales.
+  // We present the NET signed sum per group, NOT percentages, because:
+  //   - Negative evidence must not be converted into positive trust
+  //   - Aggregated |magnitudes| as % look like fixed trust allocations
+  // The label warns that these are learned directional influences.
   let coefficientContributions: ComparisonResult['coefficientContributions'] = null;
   if (hybridModel.coefficients.length === 12) {
     const oiCoeffs = hybridModel.coefficients.slice(0, 6);
     const priceCoeffs = hybridModel.coefficients.slice(6, 11);
     const confluenceCoeff = hybridModel.coefficients[11];
 
-    const oiMag = oiCoeffs.reduce((s, c) => s + Math.abs(c), 0);
-    const priceMag = priceCoeffs.reduce((s, c) => s + Math.abs(c), 0);
-    const confluenceMag = Math.abs(confluenceCoeff);
-    const totalMag = oiMag + priceMag + confluenceMag;
+    // Signed sum: positive = supports hold prediction, negative = supports break
+    const oiNet = oiCoeffs.reduce((s, c) => s + c, 0);
+    const priceNet = priceCoeffs.reduce((s, c) => s + c, 0);
 
-    if (totalMag > 0) {
-      // Preserve direction: if average coefficient is negative, the contribution is negative
-      const oiSign = oiCoeffs.reduce((s, c) => s + c, 0) >= 0 ? 1 : -1;
-      const priceSign = priceCoeffs.reduce((s, c) => s + c, 0) >= 0 ? 1 : -1;
-      const confluenceSign = confluenceCoeff >= 0 ? 1 : -1;
-
-      coefficientContributions = {
-        oi: oiSign * (oiMag / totalMag),
-        price: priceSign * (priceMag / totalMag),
-        confluence: confluenceSign * (confluenceMag / totalMag),
-      };
-    }
+    coefficientContributions = {
+      oi: oiNet,
+      price: priceNet,
+      confluence: confluenceCoeff,
+      label: 'Directional learned influence (z-scored features). Positive supports hold, negative supports break. Not a fixed weight allocation.',
+    };
   }
 
   // Explanation
   let explanation: string;
   if (hybridApproved) {
-    explanation = `Hybrid model beats both OI-only (Brier ${oiMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) and price-only (Brier ${priceMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) on ${validation.length} unseen validation observations. It is a validated confirmation signal; the displayed OI strength remains a separate ranking until hybrid scoring is explicitly enabled.`;
+    explanation = `Hybrid model beats both OI-only (Brier ${oiMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) and price-only (Brier ${priceMetrics.brierScore.toFixed(3)} → ${hybridMetrics.brierScore.toFixed(3)}) on ${validation.length} unseen validation observations. Validated Hybrid Confidence is displayed alongside the unchanged OI Strength.`;
   } else {
     const reasons: string[] = [];
     if (!brierImprovesOverOi) reasons.push(`Brier did not improve by ≥${BRIER_IMPROVEMENT_THRESHOLD} over OI-only`);
@@ -340,6 +394,11 @@ export function runModelComparison(
     winner,
     hybridApproved,
     coefficientContributions,
+    // Export hybrid model for live scoring only when approved
+    hybridCoefficients: hybridApproved
+      ? { weights: hybridModel.coefficients, bias: hybridModel.intercept }
+      : null,
+    standardization: hybridApproved ? hybridStd : null,
     explanation,
   };
 }
@@ -355,8 +414,10 @@ function emptyReport(observations: ComparisonObservation[]): ModelReport {
     holdRate: observations.length > 0
       ? observations.filter((o) => o.held).length / observations.length
       : 0,
-    supportSamples: observations.filter((o) => o.side === 'support').length,
-    resistanceSamples: observations.filter((o) => o.side === 'resistance').length,
+    trainingSupportSamples: 0,
+    trainingResistanceSamples: 0,
+    validationSupportSamples: 0,
+    validationResistanceSamples: 0,
     status: 'provisional',
   };
 }

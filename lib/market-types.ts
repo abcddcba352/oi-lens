@@ -164,8 +164,10 @@ export interface ModelReport {
   balancedAccuracy: number | null;
   brierScore: number | null;
   holdRate: number;
-  supportSamples: number;
-  resistanceSamples: number;
+  trainingSupportSamples: number;
+  trainingResistanceSamples: number;
+  validationSupportSamples: number;
+  validationResistanceSamples: number;
   status: 'calibrated' | 'provisional';
 }
 
@@ -175,7 +177,9 @@ export interface ModelComparisonReport {
   hybrid: ModelReport;
   winner: 'oi' | 'price' | 'hybrid' | 'insufficient';
   hybridApproved: boolean;
-  coefficientContributions: { oi: number; price: number; confluence: number } | null;
+  coefficientContributions: { oi: number; price: number; confluence: number; label: string } | null;
+  hybridCoefficients?: { weights: number[]; bias: number } | null;
+  standardization?: { means: number[]; stds: number[] } | null;
   explanation: string;
 }
 
@@ -191,6 +195,7 @@ export interface ConfluenceDetail {
   historicalHoldRate: number | null;
   historicalBreakRate: number | null;
   sampleCount: number;
+  hybridConfidence?: number | null;
 }
 
 export interface CurrentConfluenceReport {

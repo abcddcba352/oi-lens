@@ -50,6 +50,7 @@ export interface PriceSRZone {
   recencyScore: number;
   /** Whether this zone is historically confirmed vs projected. */
   label: 'Confirmed' | 'Projected';
+  origin?: 'pivot' | 'role-reversal';
 }
 
 export interface PriceSRFeatureVector {
@@ -301,11 +302,145 @@ export function groupPivotsIntoZones(
         bounceAtr: bounceAtrAvg,
         recencyScore,
         label: 'Confirmed',
+        origin: 'pivot',
       });
     }
   }
 
+  // Detect role reversals from broken zones
+  const roleReversed = detectRoleReversals(zones, history, atr, strikeStep);
+  zones.push(...roleReversed);
+
   return zones;
+}
+
+/**
+ * Detect role reversals from broken price zones.
+ *
+ * Role reversal logic:
+ *   - A historical support that was broken (close < center - breachTol) may
+ *     become resistance if price later retests it from below and bounces down.
+ *   - A historical resistance that was broken (close > center + breachTol) may
+ *     become support if price later retests it from above and bounces up.
+ *
+ * Both the breakout session and the retest session must be complete before
+ * the cutoff date.  Future candles are never used.
+ *
+ * Tolerances:
+ *   - Breakout confirmation: close crosses center ± (atr × 0.25)
+ *   - Retest proximity: price returns within confluenceTolerance(atr, strikeStep)
+ *   - Retest bounce: close after retest is on the new expected side
+ *
+ * The original pivot touches are NOT double-counted in the role-reversed zone.
+ *
+ * @param zones       Zones from groupPivotsIntoZones (only 'pivot' origin zones).
+ * @param history     Price sessions available (must be strictly before cutoff).
+ * @param atr         ATR-14.
+ * @param strikeStep  Strike step.
+ * @returns Additional role-reversed zones to append.
+ */
+export function detectRoleReversals(
+  zones: PriceSRZone[],
+  history: PriceSession[],
+  atr: number,
+  strikeStep: number,
+): PriceSRZone[] {
+  const reversed: PriceSRZone[] = [];
+  const tolerance = confluenceTolerance(atr, strikeStep);
+  const breachTol = atr * 0.25;
+  const totalBars = history.length;
+
+  for (const zone of zones) {
+    // Only consider zones that were predominantly broken
+    if (zone.origin !== 'pivot') continue;
+    const totalTests = zone.holds + zone.breaks;
+    if (totalTests === 0 || zone.breaks === 0) continue;
+    // Need majority breaks to consider a role reversal
+    if (zone.breaks / totalTests < 0.5) continue;
+
+    const center = zone.center;
+    const originalSide = zone.side;
+    const newSide: LevelSide = originalSide === 'support' ? 'resistance' : 'support';
+
+    // Step 1: Find breakout session — close crosses beyond breach tolerance
+    let breakoutIdx = -1;
+    for (let i = 0; i < history.length; i++) {
+      const s = history[i];
+      if (originalSide === 'support' && s.close < center - breachTol) {
+        breakoutIdx = i;
+        break;
+      }
+      if (originalSide === 'resistance' && s.close > center + breachTol) {
+        breakoutIdx = i;
+        break;
+      }
+    }
+    if (breakoutIdx < 0) continue;
+
+    // Step 2: Find retest session AFTER breakout — price returns within tolerance
+    let retestIdx = -1;
+    for (let i = breakoutIdx + 1; i < history.length; i++) {
+      const s = history[i];
+      // Price must come back close to the level
+      if (originalSide === 'support') {
+        // Broken support: price fell below, now returns up near the level
+        if (s.high >= center - tolerance && s.high <= center + tolerance) {
+          retestIdx = i;
+          break;
+        }
+      } else {
+        // Broken resistance: price rose above, now returns down near the level
+        if (s.low >= center - tolerance && s.low <= center + tolerance) {
+          retestIdx = i;
+          break;
+        }
+      }
+    }
+    if (retestIdx < 0) continue;
+
+    // Step 3: Verify bounce — check up to 3 sessions after retest
+    const bounceWindow = history.slice(retestIdx + 1, retestIdx + 4);
+    if (bounceWindow.length === 0) continue;
+
+    const lastClose = bounceWindow.at(-1)?.close ?? history[retestIdx].close;
+    // For a broken support becoming resistance:
+    //   bounce means price stayed below the level (close <= center)
+    // For a broken resistance becoming support:
+    //   bounce means price stayed above the level (close >= center)
+    const bounced = newSide === 'resistance'
+      ? lastClose <= center
+      : lastClose >= center;
+
+    if (!bounced) continue;
+
+    // Compute bounce magnitude
+    let maxBounce = 0;
+    for (const s of bounceWindow) {
+      const move = newSide === 'resistance'
+        ? center - s.close  // price dropping away from resistance
+        : s.close - center; // price rising away from support
+      if (move > maxBounce) maxBounce = move;
+    }
+
+    const recencyScore = clamp01(
+      Math.exp(-RECENCY_DECAY * (totalBars - 1 - retestIdx)),
+    );
+
+    reversed.push({
+      center,
+      side: newSide,
+      touches: 1,      // the retest itself
+      holds: 1,         // it bounced
+      breaks: 0,
+      weightedHoldRate: 0.67,  // Laplace: (1+1)/(1+2) = 0.67
+      bounceAtr: atr > 0 ? maxBounce / atr : 0,
+      recencyScore,
+      label: 'Confirmed',
+      origin: 'role-reversal',
+    });
+  }
+
+  return reversed;
 }
 
 // ─── Price S/R Features for Model ─────────────────────────────────────────────
