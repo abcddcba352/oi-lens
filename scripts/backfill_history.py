@@ -1,13 +1,16 @@
 """Build a D1 import from official NSE F&O and Cash Market UDiFF bhavcopies.
 
-Downloads both option chain snapshots and daily price sessions (OHLC + ATR14)
-directly from official NSE archives, storing them idempotently into Cloudflare D1.
-Only Python's standard library is required.
+Features:
+- Downloads option chain snapshots & daily price sessions (OHLC + ATR14) directly from official NSE archives.
+- Smart trading-day discovery: `--days N` targets N valid trading sessions (not raw calendar days).
+- Holiday & weekend resilience: handles 404s cleanly, logs staleness warnings if data is >2-3 weekdays old.
+- Warm-up preservation: retrieves 15 prior sessions of price candles so ATR-14 is mathematically accurate.
+- Safe D1 no-op: outputs `SELECT 1;` when no new records exist so wrangler executions never fail.
 
 Examples:
-  python scripts/backfill_history.py --symbols RELIANCE,TCS,SBIN --days 183
-  python scripts/backfill_history.py --symbols NIFTY,BANKNIFTY,INFY
-  python scripts/backfill_history.py --symbols ALL --days 7 --output nse_oi_update.sql
+  python scripts/backfill_history.py --symbols ALL --days 3 --output nse_oi_update.sql
+  python scripts/backfill_history.py --symbols TCS,RELIANCE,NIFTY --days 1
+  python scripts/backfill_history.py --symbols ALL --days 183
 """
 
 import argparse
@@ -29,6 +32,7 @@ INDEX_SYMBOLS = {
 }
 
 DEFAULT_SYMBOLS = [
+    "NIFTY", "BANKNIFTY", "FINNIFTY",
     "RELIANCE", "HDFCBANK", "ICICIBANK", "SBIN", "TCS", "INFY", "ITC",
     "AXISBANK", "KOTAKBANK", "BAJFINANCE", "MARUTI", "LT", "WIPRO",
     "TATAMOTORS", "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "M&M", "ASIANPAINT",
@@ -113,7 +117,6 @@ def download_bhavcopy_fo(trade_date):
 def download_bhavcopy_cm(trade_date):
     """Download official NSE Cash Market (CM) bhavcopy."""
     date_string = trade_date.strftime("%Y%m%d")
-    # Primary: UDiFF CM format (standard since July 2024)
     url_udiff = (
         "https://nsearchives.nseindia.com/content/cm/"
         f"BhavCopy_NSE_CM_0_0_0_{date_string}_F_0000.csv.zip"
@@ -325,11 +328,17 @@ def process_fo_csv(trade_date, zip_bytes, requested_tickers):
     return records, underlying_spots
 
 
-def download_and_process(trade_date, requested_tickers):
-    """Download F&O bhavcopy, Cash bhavcopy, and Indices summary for trade_date."""
+def download_and_process_day(trade_date, requested_tickers, fetch_fo=True):
+    """Download F&O bhavcopy (if requested), Cash bhavcopy, and Indices summary for trade_date."""
     trade_date_iso = trade_date.strftime("%Y-%m-%d")
-    fo_bytes = download_bhavcopy_fo(trade_date)
-    records, underlying_spots = process_fo_csv(trade_date, fo_bytes, requested_tickers)
+    records = []
+    underlying_spots = {}
+    fo_bytes = None
+
+    if fetch_fo:
+        fo_bytes = download_bhavcopy_fo(trade_date)
+        if fo_bytes:
+            records, underlying_spots = process_fo_csv(trade_date, fo_bytes, requested_tickers)
 
     cm_bytes = download_bhavcopy_cm(trade_date)
     stock_prices = parse_cm_bhavcopy(cm_bytes, requested_tickers)
@@ -339,7 +348,6 @@ def download_and_process(trade_date, requested_tickers):
 
     # Combine price sessions
     daily_sessions = {}
-    # 1. Stock prices from CM Bhavcopy
     for inst_id, ohlc in stock_prices.items():
         daily_sessions[inst_id] = {
             "date": trade_date_iso,
@@ -349,7 +357,6 @@ def download_and_process(trade_date, requested_tickers):
             "close": ohlc["close"],
         }
 
-    # 2. Index prices from Index Bhavcopy
     for inst_id, ohlc in index_prices.items():
         daily_sessions[inst_id] = {
             "date": trade_date_iso,
@@ -359,7 +366,7 @@ def download_and_process(trade_date, requested_tickers):
             "close": ohlc["close"],
         }
 
-    # 3. Fallback for any instrument that had F&O records but missed CM/Index OHLC
+    # Fallback for instruments in F&O records that missed CM/Index OHLC
     for rec in records:
         inst_id = rec["instrument_id"]
         if inst_id not in daily_sessions and rec["spot"] > 0:
@@ -372,7 +379,8 @@ def download_and_process(trade_date, requested_tickers):
                 "close": sp,
             }
 
-    return trade_date, records, daily_sessions
+    has_data = bool(records or daily_sessions or fo_bytes or cm_bytes)
+    return trade_date, records, daily_sessions, has_data
 
 
 def compute_atr14_series(sessions):
@@ -408,7 +416,20 @@ def number(value):
     return str(int(value)) if float(value).is_integer() else str(value)
 
 
-def generate_sql(records, sessions_by_instrument):
+def count_weekdays_between(d1, d2):
+    """Count business days strictly between d1 and d2 (exclusive of start, inclusive of end)."""
+    if d1 >= d2:
+        return 0
+    cur = d1 + datetime.timedelta(days=1)
+    cnt = 0
+    while cur <= d2:
+        if cur.weekday() < 5:
+            cnt += 1
+        cur += datetime.timedelta(days=1)
+    return cnt
+
+
+def generate_sql(records, sessions_by_instrument, target_date_strings):
     statements = []
     latest_metadata = {record["instrument_id"]: record for record in records}
     generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
@@ -423,10 +444,11 @@ def generate_sql(records, sessions_by_instrument):
             "instrument_type=excluded.instrument_type, strike_step=excluded.strike_step, updated_at=excluded.updated_at;"
         )
 
-    # 2. Daily Price Sessions (market_sessions) with ATR-14
+    # 2. Daily Price Sessions (market_sessions) with Wilder's ATR-14
     for instrument_id, sessions in sorted(sessions_by_instrument.items()):
         compute_atr14_series(sessions)
         for s in sessions:
+            # Include sessions that are either in the target window or have computed ATR
             session_id = f"{instrument_id}:{s['date']}"
             atr_val = number(s["atr14"]) if s.get("atr14") is not None else "NULL"
             statements.append(
@@ -444,7 +466,6 @@ def generate_sql(records, sessions_by_instrument):
         instrument_id = record["instrument_id"]
         expiry = record["expiry"]
         expiry_value = expiry_epoch(expiry)
-        # UDiFF bhavcopy is EOD: 15:30 IST = 10:00 UTC.
         captured_at = f"{record['trade_date']}T10:00:00.000Z"
         snapshot_id = f"{instrument_id}:{expiry_value}:{captured_at}"
         stock_atr_proxy = max(record["strike_step"] * 2.5, record["spot"] * 0.018)
@@ -473,6 +494,22 @@ def generate_sql(records, sessions_by_instrument):
     return statements
 
 
+def discover_trading_dates(target_sessions_count, max_lookback_days=45):
+    """Walk backwards from today to discover target_sessions_count valid trading dates."""
+    today = datetime.date.today()
+    candidate_dates = []
+    cur = today
+    checked_calendar_days = 0
+
+    while len(candidate_dates) < target_sessions_count and checked_calendar_days < max_lookback_days:
+        if cur.weekday() < 5:  # Monday to Friday
+            candidate_dates.append(cur)
+        cur -= datetime.timedelta(days=1)
+        checked_calendar_days += 1
+
+    return candidate_dates
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare official NSE EOD option OI and daily price history for Cloudflare D1.")
     parser.add_argument(
@@ -480,9 +517,10 @@ def main():
         default=",".join(DEFAULT_SYMBOLS),
         help="Comma-separated NSE F&O underlyings (default: tracked stocks, or ALL)",
     )
-    parser.add_argument("--days", type=int, default=183, help="Calendar-day lookback (default: 183)")
+    parser.add_argument("--days", type=int, default=183, help="Trading-session count to ingest (default: 183)")
     parser.add_argument("--workers", type=int, default=4, help="Parallel NSE downloads, 1-6 (default: 4)")
     parser.add_argument("--output", default="nse_oi_backfill.sql", help="Generated SQL path")
+    parser.add_argument("--warmup", type=int, default=16, help="Prior sessions for ATR-14 warm-up calculation (default: 16)")
     args = parser.parse_args()
 
     tickers = {normalize_ticker(value) for value in args.symbols.split(",") if value.strip()}
@@ -491,51 +529,113 @@ def main():
     if args.days < 1 or args.days > 370:
         raise SystemExit("--days must be between 1 and 370.")
 
-    end_date = datetime.date.today()
-    start_date = end_date - datetime.timedelta(days=args.days)
-    dates = []
-    current = start_date
-    while current <= end_date:
-        if current.weekday() < 5:
-            dates.append(current)
-        current += datetime.timedelta(days=1)
+    today = datetime.date.today()
+    max_lookback = max(args.days * 3 + 30, 60)
+    target_sessions = args.days
+    warmup_sessions = args.warmup if target_sessions < 50 else 0
 
-    print(f"Downloading official NSE EOD OI & daily price candles for {', '.join(sorted(tickers))} ({len(dates)} weekdays)...")
+    print(f"Scanning for {target_sessions} trading sessions (with {warmup_sessions} warm-up sessions for ATR-14)...")
+
+    # Probe backwards in small batches to find valid trading days
+    valid_target_dates = []
+    valid_warmup_dates = []
+    cur = today
+    checked_days = 0
+    workers = max(1, min(6, args.workers))
+
+    # Candidate weekday pool
+    weekdays = []
+    while checked_days < max_lookback:
+        if cur.weekday() < 5:
+            weekdays.append(cur)
+        cur -= datetime.timedelta(days=1)
+        checked_days += 1
+
+    # First pass: probe target dates with F&O
     records = []
     sessions_by_instrument = {}
-    workers = max(1, min(6, args.workers))
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(download_and_process, date, tickers) for date in dates]
-        for index, future in enumerate(as_completed(futures), start=1):
-            trade_date, day_records, day_sessions = future.result()
-            records.extend(day_records)
-            for inst_id, session_data in day_sessions.items():
-                sessions_by_instrument.setdefault(inst_id, []).append(session_data)
-            print(f"[{index}/{len(dates)}] {trade_date}: {len(day_records)} OI symbols, {len(day_sessions)} price sessions", end="\r")
-    print()
+    found_trading_days = set()
 
-    # Sort each instrument's sessions chronologically before writing
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit first batch of candidate weekdays
+        futures = {
+            executor.submit(download_and_process_day, date, tickers, True): date
+            for date in weekdays[: target_sessions + 10]
+        }
+        for future in as_completed(futures):
+            trade_date, day_records, day_sessions, has_data = future.result()
+            if has_data and (day_records or day_sessions):
+                found_trading_days.add(trade_date)
+                records.extend(day_records)
+                for inst_id, session_data in day_sessions.items():
+                    sessions_by_instrument.setdefault(inst_id, []).append(session_data)
+
+    sorted_found_dates = sorted(found_trading_days, reverse=True)
+    valid_target_dates = sorted_found_dates[:target_sessions]
+
+    # If we need warm-up price sessions for accurate ATR-14, fetch CM/Index data for prior weekdays
+    if warmup_sessions > 0 and valid_target_dates:
+        earliest_target = min(valid_target_dates)
+        warmup_candidates = [d for d in weekdays if d < earliest_target][:warmup_sessions + 5]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            warmup_futures = [
+                executor.submit(download_and_process_day, date, tickers, False)
+                for date in warmup_candidates
+            ]
+            for future in as_completed(warmup_futures):
+                trade_date, _, day_sessions, has_data = future.result()
+                if has_data and day_sessions:
+                    valid_warmup_dates.append(trade_date)
+                    for inst_id, session_data in day_sessions.items():
+                        sessions_by_instrument.setdefault(inst_id, []).append(session_data)
+
+    output = Path(args.output)
+
+    # Check for staleness or upstream issues
+    if sorted_found_dates:
+        latest_date = sorted_found_dates[0]
+        gap_weekdays = count_weekdays_between(latest_date, today)
+        if gap_weekdays >= 3:
+            print(f"\n[STALENESS WARNING] Most recent available NSE data is from {latest_date} ({gap_weekdays} weekdays ago).")
+            print("  If markets were open recently, verify whether NSE archives are delayed or upstream changed.")
+        else:
+            print(f"\nLatest available NSE session: {latest_date} (gap: {gap_weekdays} weekdays).")
+    else:
+        print("\n[STALENESS WARNING] No NSE data found in the scanned range. Market closed, holiday, or upstream unavailable.")
+
+    # Filter records to target dates only
+    target_date_strings = {d.strftime("%Y-%m-%d") for d in valid_target_dates}
+    target_records = [r for r in records if r["trade_date"] in target_date_strings]
+
+    # If no records found, output safe SELECT 1; no-op
+    if not target_records and not sessions_by_instrument:
+        safe_noop = "-- Market closed, holiday, or no new records found\nSELECT 1;\n"
+        output.write_text(safe_noop, encoding="utf-8")
+        print(f"No new trading records. Generated safe no-op statement in {output.resolve()}.")
+        return
+
+    # Sort each instrument's sessions chronologically before ATR calculation
     for inst_id in sessions_by_instrument:
         sessions_by_instrument[inst_id].sort(key=lambda s: s["date"])
 
-    output = Path(args.output)
-    statements = generate_sql(records, sessions_by_instrument)
+    statements = generate_sql(target_records, sessions_by_instrument, target_date_strings)
+    if not statements:
+        statements = ["-- Market closed, holiday, or no new updates\nSELECT 1;"]
+
     output.write_text("\n".join(statements), encoding="utf-8")
 
     oi_counts = {}
-    for record in records:
+    for record in target_records:
         oi_counts[record["instrument_id"]] = oi_counts.get(record["instrument_id"], 0) + 1
 
     total_sessions = sum(len(s) for s in sessions_by_instrument.values())
     print(f"Generated {output.resolve()} with {len(statements)} idempotent statements.")
-    print(f"Total price sessions generated: {total_sessions}")
+    print(f"Total target trading sessions found: {len(valid_target_dates)}")
+    print(f"Total price sessions stored (including ATR warm-up): {total_sessions}")
     for instrument_id in sorted(set(list(oi_counts.keys()) + list(sessions_by_instrument.keys()))):
         oi_c = oi_counts.get(instrument_id, 0)
         sess_c = len(sessions_by_instrument.get(instrument_id, []))
         print(f"  {instrument_id}: {oi_c} EOD snapshots, {sess_c} daily price sessions")
-
-    if not records and not sessions_by_instrument:
-        print("No matching NSE records found; symbols may not have traded in this period.")
 
 
 if __name__ == "__main__":

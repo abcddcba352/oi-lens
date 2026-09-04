@@ -370,7 +370,7 @@ function rankLevels(
 ) {
   return (['support', 'resistance'] as const).flatMap((side) => {
     const maxOi = sideMaxOi(levels, side);
-    return levels
+    const topScored = levels
       .filter((level) => level.side === side)
       .sort((a, b) => {
         const scoreA = a.score / 100;
@@ -393,8 +393,22 @@ function rankLevels(
             : scoreB * 0.55 + oiB * 0.2 + b.features.clusterOi * 0.15 + b.features.persistence * 0.1;
         return valueB - valueA || a.distancePoints - b.distancePoints;
       })
-      .slice(0, 3)
-      .map((level, index) => ({ ...level, rank: index + 1 }));
+      .slice(0, 3);
+
+    const primaryCandidate = topScored[0];
+
+    // Order spatially from spot:
+    // Support: descending by strike (S1 > S2 > S3, closest to spot first)
+    // Resistance: ascending by strike (R1 < R2 < R3, closest to spot first)
+    const spatiallySorted = [...topScored].sort((a, b) =>
+      side === 'support' ? b.strike - a.strike : a.strike - b.strike,
+    );
+
+    return spatiallySorted.map((level, index) => ({
+      ...level,
+      rank: index + 1,
+      isPrimary: primaryCandidate ? level.strike === primaryCandidate.strike : index === 0,
+    }));
   });
 }
 
@@ -417,8 +431,8 @@ function outcomePrior(
 }
 
 function rangePositionFor(levels: ScoredCandidate[], spot: number) {
-  const support = levels.find((level) => level.side === 'support' && level.rank === 1) ?? null;
-  const resistance = levels.find((level) => level.side === 'resistance' && level.rank === 1) ?? null;
+  const support = levels.find((level) => level.side === 'support' && (level.isPrimary ?? level.rank === 1)) ?? null;
+  const resistance = levels.find((level) => level.side === 'resistance' && (level.isPrimary ?? level.rank === 1)) ?? null;
   const range = support && resistance ? resistance.strike - support.strike : 0;
   return range > 0 && support ? clamp((spot - support.strike) / range) : null;
 }
@@ -443,8 +457,8 @@ function makeTimeframe(
     note: string;
   },
 ): TimeframeAnalysis {
-  const primarySupport = levels.find((level) => level.side === 'support' && level.rank === 1) ?? null;
-  const primaryResistance = levels.find((level) => level.side === 'resistance' && level.rank === 1) ?? null;
+  const primarySupport = levels.find((level) => level.side === 'support' && (level.isPrimary ?? level.rank === 1)) ?? null;
+  const primaryResistance = levels.find((level) => level.side === 'resistance' && (level.isPrimary ?? level.rank === 1)) ?? null;
   return {
     horizon,
     label: horizon === 'intraday' ? 'Intraday OI map' : 'Positional price-zone map',
@@ -744,7 +758,7 @@ export function analyzeSnapshotWithPriceHistory(
 
   const positionalLevels = rankLevels(positionalScored, 'positional', liveSnapshot.instrumentType);
   const intradayLevels = rankLevels(intradayScored, 'intraday', liveSnapshot.instrumentType);
-  const primaryPositionalLevels = positionalLevels.filter((level) => level.rank === 1);
+  const primaryPositionalLevels = positionalLevels.filter((level) => level.isPrimary ?? level.rank === 1);
   const primaryHistoricalTests = primaryPositionalLevels.reduce((sum, level) => sum + level.historicalTests, 0);
   const primaryHistoricalHoldRate = primaryHistoricalTests
     ? primaryPositionalLevels.reduce(

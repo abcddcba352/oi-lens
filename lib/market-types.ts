@@ -90,6 +90,7 @@ export interface LevelSignal {
   historicalTests?: number;
   historicalHoldRate?: number | null;
   oiHistorySnapshots?: number;
+  isPrimary?: boolean;
 }
 
 export type AnalysisHorizon = 'intraday' | 'positional';

@@ -854,7 +854,27 @@ function SignalCard({ level, side, horizon }: { level: LevelSignal | null; side:
 
 function LevelCard({ level, provisional }: { level: LevelSignal; provisional: boolean }) {
   const support = level.side === 'support';
-  return <article className="rounded-xl border border-border/70 bg-background/70 p-4"><div className="flex items-center justify-between"><span className={`text-[10px] font-black uppercase tracking-[0.12em] ${support ? 'text-emerald-300' : 'text-rose-300'}`}>#{level.rank} {level.side}</span><span className="font-mono text-xs font-black text-primary">{level.score}/100{provisional ? '*' : ''}</span></div><p className="mt-3 font-mono text-2xl font-black">{money(level.strike)}</p><p className="mt-2 text-xs font-bold">{level.distancePoints.toFixed(1)} pts · {level.distancePercent.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">{compact(level.oi)} OI · {signedCompact(level.oiChange)} change</p></article>;
+  const isPrimary = level.isPrimary ?? false;
+  return (
+    <article className={`rounded-xl border p-4 ${isPrimary ? (support ? 'border-emerald-400/40 bg-emerald-400/[0.08] ring-1 ring-emerald-400/30' : 'border-rose-400/40 bg-rose-400/[0.08] ring-1 ring-rose-400/30') : 'border-border/70 bg-background/70'}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <span className={`text-[10px] font-black uppercase tracking-[0.12em] ${support ? 'text-emerald-300' : 'text-rose-300'}`}>
+            #{level.rank} {level.side}
+          </span>
+          {isPrimary && (
+            <Badge variant="outline" className={`text-[9px] px-1.5 py-0 font-bold ${support ? 'border-emerald-400/40 text-emerald-300' : 'border-rose-400/40 text-rose-300'}`}>
+              Major Wall
+            </Badge>
+          )}
+        </div>
+        <span className="font-mono text-xs font-black text-primary">{level.score}/100{provisional ? '*' : ''}</span>
+      </div>
+      <p className="mt-3 font-mono text-2xl font-black">{money(level.strike)}</p>
+      <p className="mt-2 text-xs font-bold">{level.distancePoints.toFixed(1)} pts · {level.distancePercent.toFixed(2)}%</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">{compact(level.oi)} OI · {signedCompact(level.oiChange)} change</p>
+    </article>
+  );
 }
 
 function Metric({ icon, label, value, detail }: { icon: React.ReactNode; label: string; value: string; detail: string }) {

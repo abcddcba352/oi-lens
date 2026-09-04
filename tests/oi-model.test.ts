@@ -192,3 +192,27 @@ test('positional summary reports only the ranked primary zones', () => {
     assert.ok(Math.abs((analysis.positional.historicalHoldRate ?? 0) - expectedRate) < 1e-12);
   }
 });
+
+test('support levels are ordered descending (S1 > S2 > S3) and resistance levels ascending (R1 < R2 < R3)', () => {
+  const snapshot = getDemoSnapshot();
+  const analysis = analyzeSnapshotWithPriceHistory(snapshot, getDemoPriceHistory(snapshot.symbol, snapshot.asOf));
+
+  for (const timeframe of [analysis.intraday, analysis.positional]) {
+    const supports = timeframe.levels.filter((l) => l.side === 'support');
+    const resistances = timeframe.levels.filter((l) => l.side === 'resistance');
+
+    for (let i = 0; i < supports.length - 1; i++) {
+      assert.ok(supports[i].strike > supports[i + 1].strike, `Support levels not descending: ${supports[i].strike} <= ${supports[i + 1].strike}`);
+      assert.equal(supports[i].rank, i + 1);
+    }
+
+    for (let i = 0; i < resistances.length - 1; i++) {
+      assert.ok(resistances[i].strike < resistances[i + 1].strike, `Resistance levels not ascending: ${resistances[i].strike} >= ${resistances[i + 1].strike}`);
+      assert.equal(resistances[i].rank, i + 1);
+    }
+
+    assert.ok(supports.some((l) => l.isPrimary));
+    assert.ok(resistances.some((l) => l.isPrimary));
+  }
+});
+

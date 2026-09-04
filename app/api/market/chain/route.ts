@@ -1,5 +1,5 @@
 import { analyzeSnapshotWithPriceHistory } from '@/lib/oi-model';
-import { getMarketProvider } from '@/lib/providers';
+import { getMarketProvider, DemoProvider } from '@/lib/providers';
 import { readFyersAuthorization } from '@/lib/fyers-auth';
 import {
   evaluatePendingWalls,
@@ -162,9 +162,16 @@ export async function GET(request: Request) {
 
     const snapshot = storedSnapshot
       ?? await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
-    const cached = provider.id === 'demo' && snapshot.source !== 'demo'
+    let cached = provider.id === 'demo' && snapshot.source !== 'demo'
       ? await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf)
       : await loadOrRefreshPriceHistory(provider, snapshot);
+
+    // Fallback for demo-supported indices if D1 does not have cached sessions yet
+    if (!cached && (snapshot.instrumentType === 'index' || symbol.endsWith('-INDEX'))) {
+      const demoProvider = new DemoProvider();
+      cached = await loadOrRefreshPriceHistory(demoProvider, snapshot);
+    }
+
     if (!cached) {
       throw new Error(`Only 0 cached daily sessions available for ${symbol}; at least ${MIN_SESSIONS_FOR_BASIC_ANALYSIS} are needed for basic analysis.`);
     }
@@ -330,6 +337,6 @@ export async function GET(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to analyze the option chain.';
-    return Response.json({ error: message }, { status: 502 });
+    return Response.json({ error: message }, { status: 400 });
   }
 }
