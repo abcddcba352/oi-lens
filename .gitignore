@@ -39,9 +39,9 @@ next-env.d.ts
 /work/
 *.tsbuildinfo
 __pycache__/
-nse_oi_backfill.sql
-nse_oi_update.sql
-backfill_data.sql
+*.sql
+*.sql.chunk*
+upload*.bat
 
 # generated docs and browser profiles
 docs/chrome-pdf-profile/

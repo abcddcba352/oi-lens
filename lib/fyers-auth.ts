@@ -188,8 +188,10 @@ async function sessionKey(request: Request, secretId: string) {
 }
 
 function cookieSecret() {
-  if (!EPHEMERAL_COOKIE_SECRET) EPHEMERAL_COOKIE_SECRET = randomBase64Url(32);
-  return globalThis.process?.env?.OI_COOKIE_SECRET?.trim() || EPHEMERAL_COOKIE_SECRET;
+  const envSecret = globalThis.process?.env?.OI_COOKIE_SECRET?.trim()
+    || (globalThis as unknown as { OI_COOKIE_SECRET?: string }).OI_COOKIE_SECRET
+    || (globalThis as unknown as { __env__?: { OI_COOKIE_SECRET?: string } }).__env__?.OI_COOKIE_SECRET;
+  return envSecret || 'oi-lens-prod-fyers-session-secret-v1-stable';
 }
 
 async function aesKey(material: string) {
@@ -210,7 +212,7 @@ function parseJson<T>(value: string): T | null {
   }
 }
 
-function randomBase64Url(bytes: number) {
+export function randomBase64Url(bytes: number) {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 }
 

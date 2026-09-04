@@ -150,21 +150,40 @@ export async function GET(request: Request) {
   try {
     const authorization = await readFyersAuthorization(request);
     const provider = getMarketProvider(authorization);
-    // For offline (demo provider), try the stored snapshot first
-    const storedSnapshot = provider.id === 'demo'
-      ? await loadLatestStoredSnapshot(symbol, expiryEpoch)
-      : null;
-
-    // If offline and no stored snapshot exists, give a specific error
-    if (provider.id === 'demo' && !storedSnapshot) {
-      throw new Error('No saved OI snapshot for this stock. Connect FYERS and refresh once to archive one.');
+    let snapshot: MarketSnapshot | null = null;
+    if (provider.id === 'fyers') {
+      try {
+        snapshot = await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
+      } catch (fyersError) {
+        console.warn('FYERS live chain fetch failed (market may be closed/after-hours); falling back to stored D1 snapshot:', fyersError);
+        snapshot = await loadLatestStoredSnapshot(symbol, expiryEpoch);
+        if (!snapshot) {
+          throw fyersError;
+        }
+      }
+    } else {
+      snapshot = await loadLatestStoredSnapshot(symbol, expiryEpoch);
     }
 
-    const snapshot = storedSnapshot
-      ?? await provider.fetchOptionChain({ symbol, expiryEpoch, strikeCount: 25 });
+    if (!snapshot) {
+      throw new Error(`No saved OI snapshot found for ${symbol}. Please ensure backfill has completed or connect FYERS.`);
+    }
+
     let cached = provider.id === 'demo' && snapshot.source !== 'demo'
       ? await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf)
-      : await loadOrRefreshPriceHistory(provider, snapshot);
+      : null;
+
+    if (!cached) {
+      try {
+        cached = await loadOrRefreshPriceHistory(provider, snapshot);
+      } catch {
+        cached = await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf);
+      }
+    }
+
+    if (!cached) {
+      cached = await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf);
+    }
 
     // Fallback for demo-supported indices if D1 does not have cached sessions yet
     if (!cached && (snapshot.instrumentType === 'index' || symbol.endsWith('-INDEX'))) {

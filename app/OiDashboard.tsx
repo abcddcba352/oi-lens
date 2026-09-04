@@ -269,9 +269,15 @@ function SymbolSearch({
   onInvalid: (value: string) => void;
   fyersConnected: boolean;
 }) {
-  const [query, setQuery] = useState(value);
+  const matchedOption = options.find((opt) => opt.symbol === value);
+  const [query, setQuery] = useState(matchedOption?.label ?? value);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const opt = options.find((o) => o.symbol === value);
+    if (opt) setQuery(opt.label);
+  }, [value, options]);
 
   const q = query.trim().toUpperCase();
   const filtered = q.length === 0 ? options.slice(0, 12) : options.filter(
@@ -529,11 +535,15 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ appId, secretId }),
       });
-      const payload = await response.json() as { error?: string };
+      const payload = await response.json() as { error?: string; loginUrl?: string };
       if (!response.ok) throw new Error(payload.error ?? 'Unable to save FYERS setup.');
       setFyers({ configured: true, connected: false, checked: true });
       setSecretId('');
-      window.location.assign('/api/auth/fyers/login');
+      if (payload.loginUrl) {
+        window.location.href = payload.loginUrl;
+      } else {
+        window.location.assign('/api/auth/fyers/login');
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to save FYERS setup.');
       setSetupSaving(false);
@@ -578,9 +588,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             <div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Redirect URL in FYERS:</strong><br /><span className="break-all font-mono text-[11px]">{fyersRedirectUrl || 'Loading local callback URL…'}</span><p className="mt-2">Copy this exact URL into your FYERS API app. This local-only site uses localhost, not the old cloud URL.</p></div>
             <form className="mt-5 grid gap-4" onSubmit={saveFyersSetup}>
               <label htmlFor="fyers-app-id" className="grid gap-1.5 text-xs font-bold">App ID</label>
-              <div className="relative"><Input id="fyers-app-id" className="h-10 pr-11 font-mono" type={showAppId ? 'text' : 'password'} value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showAppId ? 'Hide App ID' : 'Show App ID'} title={showAppId ? 'Hide App ID' : 'Show App ID'} onClick={() => setShowAppId((visible) => !visible)}>{showAppId ? <EyeOff /> : <Eye />}</Button></div>
+              <div className="relative"><Input id="fyers-app-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showAppId ? 'none' : 'disc' }} type="text" value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showAppId ? 'Hide App ID' : 'Show App ID'} title={showAppId ? 'Hide App ID' : 'Show App ID'} onClick={() => setShowAppId((visible) => !visible)}>{showAppId ? <EyeOff /> : <Eye />}</Button></div>
               <label htmlFor="fyers-secret-id" className="grid gap-1.5 text-xs font-bold">Secret ID</label>
-              <div className="relative"><Input id="fyers-secret-id" className="h-10 pr-11 font-mono" type={showSecretId ? 'text' : 'password'} value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="new-password" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} title={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} onClick={() => setShowSecretId((visible) => !visible)}>{showSecretId ? <EyeOff /> : <Eye />}</Button></div>
+              <div className="relative"><Input id="fyers-secret-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showSecretId ? 'none' : 'disc' }} type="text" value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} title={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} onClick={() => setShowSecretId((visible) => !visible)}>{showSecretId ? <EyeOff /> : <Eye />}</Button></div>
               <Button type="submit" size="lg" disabled={setupSaving}>{setupSaving ? <RefreshCw className="animate-spin" data-icon="inline-start" /> : <PlugZap data-icon="inline-start" />}{setupSaving ? 'Connecting…' : 'Save and login with FYERS'}</Button>
               {fyers.configured && <Button type="button" variant="ghost" className="text-muted-foreground" onClick={() => void forgetFyersSetup()}>Forget saved FYERS setup</Button>}
             </form>

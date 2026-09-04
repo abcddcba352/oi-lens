@@ -435,11 +435,21 @@ def generate_sql(records, sessions_by_instrument, target_date_strings):
     generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
     # 1. Instruments metadata
-    for instrument_id, record in sorted(latest_metadata.items()):
+    all_instruments = set(latest_metadata.keys()).union(sessions_by_instrument.keys())
+    for instrument_id in sorted(all_instruments):
+        if instrument_id in latest_metadata:
+            record = latest_metadata[instrument_id]
+            display_name = record["display_name"]
+            instrument_type = record["instrument_type"]
+            strike_step = record["strike_step"]
+        else:
+            ticker = instrument_id[4:-3] if instrument_id.startswith("NSE:") and instrument_id.endswith("-EQ") else instrument_id
+            _, display_name, instrument_type, strike_step = symbol_metadata(ticker)
+
         statements.append(
             "INSERT INTO instruments (id, symbol, display_name, instrument_type, strike_step, updated_at) VALUES "
-            f"({sql_text(instrument_id)}, {sql_text(instrument_id)}, {sql_text(record['display_name'])}, "
-            f"{sql_text(record['instrument_type'])}, {number(record['strike_step'])}, {sql_text(generated_at)}) "
+            f"({sql_text(instrument_id)}, {sql_text(instrument_id)}, {sql_text(display_name)}, "
+            f"{sql_text(instrument_type)}, {number(strike_step)}, {sql_text(generated_at)}) "
             "ON CONFLICT(id) DO UPDATE SET display_name=excluded.display_name, "
             "instrument_type=excluded.instrument_type, strike_step=excluded.strike_step, updated_at=excluded.updated_at;"
         )
@@ -456,7 +466,7 @@ def generate_sql(records, sessions_by_instrument, target_date_strings):
                 f"({sql_text(session_id)}, {sql_text(instrument_id)}, {sql_text(s['date'])}, "
                 f"{number(s['open'])}, {number(s['high'])}, {number(s['low'])}, {number(s['close'])}, "
                 f"{atr_val}, 'nse-bhavcopy') "
-                "ON CONFLICT(instrument_id, session_date) DO UPDATE SET "
+                "ON CONFLICT(id) DO UPDATE SET "
                 "open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, "
                 "atr14=coalesce(excluded.atr14, market_sessions.atr14), source=excluded.source;"
             )
