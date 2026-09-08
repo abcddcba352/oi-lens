@@ -318,7 +318,7 @@ export async function persistWallPredictions(snapshot: MarketSnapshot, snapshotI
   for (const side of ['support', 'resistance'] as const) {
     const wall = walls[side];
     if (!wall) continue;
-    const id = `${snapshot.symbol}:${snapshot.expiryEpoch ?? snapshot.expiry}:${wall.declaredDate}:${side}`;
+    const id = `${snapshotId}:${side}`;
     const values = {
       id,
       instrumentId: snapshot.symbol,
@@ -335,9 +335,8 @@ export async function persistWallPredictions(snapshot: MarketSnapshot, snapshotI
     };
     insertions.push(
       db.insert(wallPredictions).values(values).onConflictDoUpdate({
-        target: wallPredictions.id,
+        target: [wallPredictions.snapshotId, wallPredictions.side],
         set: {
-          snapshotId: values.snapshotId,
           strike: values.strike,
           spotAtDeclaration: values.spotAtDeclaration,
           oiAtDeclaration: values.oiAtDeclaration,
