@@ -9,7 +9,7 @@
     "dev": "npm run build && wrangler dev --config dist/server/wrangler.json --port 3000 --persist-to .wrangler/state",
     "dev:hot": "vinext dev",
     "build": "vinext build",
-    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
+    "deploy": "npm run build && node -e \"const fs=require('fs'),p='dist/server/wrangler.json';if(fs.existsSync(p)){const c=JSON.parse(fs.readFileSync(p,'utf8'));if(Array.isArray(c.d1_databases)){const s=new Set();c.d1_databases=c.d1_databases.filter(x=>s.has(x.binding)?false:s.add(x.binding));fs.writeFileSync(p,JSON.stringify(c,null,2));}}\" && wrangler deploy --config dist/server/wrangler.json",
     "start": "wrangler dev --config dist/server/wrangler.json --port 3000 --persist-to .wrangler/state",
     "lint": "oxlint app lib db",
     "format": "oxfmt",
