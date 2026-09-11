@@ -9,6 +9,7 @@
     "dev": "npm run build && wrangler dev --config dist/server/wrangler.json --port 3000 --persist-to .wrangler/state",
     "dev:hot": "vinext dev",
     "build": "vinext build",
+    "deploy": "npm run build && wrangler deploy --config dist/server/wrangler.json",
     "start": "wrangler dev --config dist/server/wrangler.json --port 3000 --persist-to .wrangler/state",
     "lint": "oxlint app lib db",
     "format": "oxfmt",

@@ -1,11 +1,12 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Activity, ArrowDownRight, ArrowUpRight, Eye, EyeOff, History, LogOut, PlugZap, RefreshCw, Search, Settings, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { Activity, ArrowDownRight, ArrowUpRight, Eye, EyeOff, History, LogOut, PlugZap, RefreshCw, Search, Settings, ShieldCheck, TriangleAlert, X, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { ResistanceScreener } from '@/components/ResistanceScreener';
 import type { ConfluenceDetail, LevelSignal, MarketAnalysis, ModelComparisonReport, ModelReport, CurrentConfluenceReport, TimeframeAnalysis } from '@/lib/market-types';
 import type { FeatureThresholds, WallStats } from '@/lib/wall-backtest';
 import type { QuarterStats } from '@/lib/history-store';
@@ -376,6 +377,7 @@ function SymbolSearch({
 }
 
 export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
+  const [activeView, setActiveView] = useState<'levels' | 'screener'>('levels');
   const [analysis, setAnalysis] = useState<DashboardAnalysis>(initial);
   const [symbol, setSymbol] = useState(initial.snapshot.symbol);
   const [instrumentOptions, setInstrumentOptions] = useState<InstrumentOption[]>(indexFallback);
@@ -575,7 +577,54 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border/70 bg-background/90 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1480px] items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3"><span className="grid size-10 place-items-center rounded-xl bg-primary font-mono text-sm font-black text-primary-foreground shadow-[0_0_28px_color-mix(in_oklch,var(--primary),transparent_70%)]">OI</span><div><p className="font-heading text-lg font-bold tracking-tight">OI Lens</p><p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Derivative structure lab</p></div></div>
+          <div className="flex flex-wrap items-center gap-5">
+            <div className="flex items-center gap-3">
+              <span className="grid size-10 place-items-center rounded-xl bg-primary font-mono text-sm font-black text-primary-foreground shadow-[0_0_28px_color-mix(in_oklch,var(--primary),transparent_70%)]">OI</span>
+              <div>
+                <p className="font-heading text-lg font-bold tracking-tight">OI Lens</p>
+                <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground">Derivative structure lab</p>
+              </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex items-center rounded-xl border border-border/70 bg-card/90 p-1 text-xs shadow-inner">
+              <button
+                type="button"
+                onClick={() => setActiveView('levels')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition-all ${
+                  activeView === 'levels'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Activity className="size-3.5" />
+                Level Map
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveView('screener')}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition-all ${
+                  activeView === 'screener'
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <Zap className="size-3.5 text-amber-400" />
+                Resistance Screener
+                <Badge
+                  variant="outline"
+                  className={`ml-1 text-[9px] px-1 py-0 font-mono ${
+                    activeView === 'screener'
+                      ? 'border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground'
+                      : 'border-amber-400/30 text-amber-300'
+                  }`}
+                >
+                  Method 2
+                </Badge>
+              </button>
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center justify-end gap-2"><Badge variant="outline" className={snapshot.source === 'fyers' ? 'h-7 border-emerald-300/25 bg-emerald-300/10 px-3 text-emerald-200' : 'h-7 border-amber-300/25 bg-amber-300/10 px-3 text-amber-200'}>{modeLabel}</Badge>{fyers.checked && (fyers.connected ? <Button variant="outline" size="lg" className="border-border/80 bg-card" onClick={() => void disconnectFyers()}><LogOut data-icon="inline-start" />Disconnect FYERS</Button> : <Button variant="outline" size="lg" className="border-primary/40 bg-primary/10 text-primary" onClick={() => fyers.configured ? window.location.assign('/api/auth/fyers/login') : setSetupOpen(true)}><PlugZap data-icon="inline-start" />{fyers.configured ? 'Connect FYERS' : 'Setup FYERS'}</Button>)}<Button variant="outline" size="icon-lg" className="border-border/80 bg-card" aria-label="FYERS settings" title="FYERS settings" onClick={() => setSetupOpen(true)}><Settings /></Button>{fyers.connected && <Button variant="outline" size="lg" className="border-amber-400/30 bg-amber-400/10 text-amber-200" disabled={backfillState?.running} onClick={() => void runBackfill()}><History className={backfillState?.running ? 'animate-spin' : ''} data-icon="inline-start" />{backfillState?.running ? `Backfilling… ${backfillState.processed}/${backfillState.total}` : backfillState ? `Backfilled ${backfillState.processed}` : 'Run Backfill'}</Button>}<Button variant="outline" size="lg" className="border-border/80 bg-card" disabled={loading} onClick={() => load()}><RefreshCw className={loading ? 'animate-spin' : ''} data-icon="inline-start" />Refresh</Button></div>
         </div>
       </header>
@@ -600,7 +649,18 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
 
       <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         {error && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error}</div>}
-        <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">
+
+        {activeView === 'screener' ? (
+          <ResistanceScreener
+            onSelectSymbol={(sym) => {
+              setSymbol(sym);
+              setActiveView('levels');
+              void load(sym);
+            }}
+          />
+        ) : (
+          <>
+            <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">
           <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Two-horizon level map</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Intraday OI and positional support/resistance</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">The intraday map reads live positioning strength. The positional map combines current OI with six months of daily price-zone behaviour. They are kept separate so daily history is never presented as intraday proof.</p></div>
           <SymbolSearch
             key={symbol}
@@ -618,6 +678,19 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             <div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><h2 className="font-heading text-2xl font-bold">{snapshot.displayName}</h2><Badge variant="secondary">{snapshot.instrumentType.toUpperCase()}</Badge>{snapshot.instrumentType === 'stock' && <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary">Stock-specific model</Badge>}</div><p className="mt-1 text-sm text-muted-foreground">{snapshot.expiry} · {dateFormatter.format(new Date(snapshot.asOf))}</p></div><div className="text-right"><p className="font-mono text-3xl font-black">{money(snapshot.spot)}</p><p className={`mt-1 inline-flex items-center gap-1 text-sm font-bold ${snapshot.spotChangePercent >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>{snapshot.spotChangePercent >= 0 ? <ArrowUpRight className="size-4" /> : <ArrowDownRight className="size-4" />}{snapshot.spotChangePercent.toFixed(2)}% today</p></div></div>
             <div className="mt-7 grid gap-3 md:grid-cols-2"><SignalCard level={primarySupport} side="support" horizon="Positional" /><SignalCard level={primaryResistance} side="resistance" horizon="Positional" /></div>
             {primarySupport && primaryResistance && <div className="mt-6 rounded-xl border border-border/60 bg-background/70 p-4"><div className="flex items-center justify-between text-xs font-bold"><span className="text-emerald-300">S {money(primarySupport.strike)}</span><span className="text-muted-foreground">Spot is {rangePosition}% through the selected OI range</span><span className="text-rose-300">R {money(primaryResistance.strike)}</span></div><div className="relative mt-4 h-2 rounded-full bg-gradient-to-r from-emerald-400 via-primary to-rose-400"><span className="absolute top-1/2 h-5 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_12px_white]" style={{ left: `${rangePosition}%` }} /></div><div className="mt-3 flex justify-between text-[11px] text-muted-foreground"><span>{primarySupport.distancePoints.toFixed(1)} pts to support</span><strong className="text-foreground">{money(snapshot.spot)} spot</strong><span>{primaryResistance.distancePoints.toFixed(1)} pts to resistance</span></div></div>}
+            {primaryResistance && primaryResistance.oiChange > 0 && (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.05] p-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Zap className="size-4 shrink-0 text-amber-400" />
+                  <span>
+                    <strong className="text-emerald-300">Method 2 Footprint:</strong> Resistance at <strong className="font-mono text-foreground">₹{money(primaryResistance.strike)}</strong> is accumulating fresh Call OI ({signedCompact(primaryResistance.oiChange)}) with volume confirmation.
+                  </span>
+                </div>
+                <Badge variant="outline" className="border-emerald-400/30 bg-emerald-400/10 text-emerald-300 text-[10px] font-mono">
+                  Strong Ceiling
+                </Badge>
+              </div>
+            )}
           </CardContent></Card>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
             <Metric icon={<History />} label="History window" value="6 months" detail={`${diagnostics.lookbackStart} to ${diagnostics.lookbackEnd}`} />
@@ -817,6 +890,8 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         {/* ─── Current OI / Price S/R Confluence ────────────────────────── */}
         {!dataStatus?.partialHistory && <ConfluenceSection confluence={analysis.currentConfluence} />}
 
+          </>
+        )}
       </div>
     </main>
 
