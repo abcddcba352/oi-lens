@@ -11,7 +11,7 @@ git add .
 
 echo.
 echo [2/3] Committing changes...
-git commit -m "Add Resistance Screener Method 2 and GitHub-to-Cloudflare deployment workflow"
+git commit -m "Add Resistance Screener Method 2, Cloudflare deploy workflow, and D1 binding deduplication"
 
 echo.
 echo [3/3] Pushing to GitHub (origin/main)...
