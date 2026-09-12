@@ -647,8 +647,27 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         </div>
       )}
 
-      <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
-        {error && <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100"><TriangleAlert className="size-4 shrink-0" />{error}</div>}
+        {error && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100">
+            <div className="flex items-center gap-2">
+              <TriangleAlert className="size-4 shrink-0 text-amber-400" />
+              <span>
+                {error.includes('authenticate the user')
+                  ? 'Your daily FYERS session has expired (FYERS tokens reset every 24 hours). Click "Disconnect FYERS" to use stored data, or reconnect.'
+                  : error}
+              </span>
+            </div>
+            {error.includes('authenticate the user') && (
+              <button
+                type="button"
+                onClick={() => void disconnectFyers()}
+                className="rounded-lg border border-amber-400/40 bg-amber-400/15 px-3 py-1 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-400/25"
+              >
+                Disconnect FYERS
+              </button>
+            )}
+          </div>
+        )}
 
         {activeView === 'screener' ? (
           <ResistanceScreener
