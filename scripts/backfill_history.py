@@ -22,6 +22,7 @@ import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from nse_evidence import DDL, parse_delivery, parse_futures, parse_sector_prices, evidence_sql, membership_sql
 
 
 INDEX_SYMBOLS = {
@@ -74,6 +75,21 @@ def normalize_ticker(value):
     if ticker == "NIFTYBANK-INDEX":
         return "BANKNIFTY"
     return ticker
+
+
+def ticker_from_instrument_id(instrument_id):
+    """Convert a stored instrument id back to the archive ticker used by parsers."""
+    for ticker, metadata in INDEX_SYMBOLS.items():
+        if metadata[0] == instrument_id:
+            return ticker
+    return normalize_ticker(instrument_id)
+
+
+def resolve_archive_tickers(requested_tickers, records):
+    """Resolve ALL to the F&O instruments actually present in an FO archive."""
+    if "ALL" not in requested_tickers or not records:
+        return requested_tickers
+    return {ticker_from_instrument_id(record["instrument_id"]) for record in records}
 
 
 def symbol_metadata(ticker, inferred_step=None):
@@ -201,11 +217,11 @@ def parse_indices_csv(csv_bytes, requested_tickers):
             if not name:
                 continue
             matched_key = None
-            if "nifty 50" in name and "junior" not in name and "next" not in name:
+            if name == "nifty 50":
                 matched_key = "NIFTY"
-            elif "nifty bank" in name:
+            elif name == "nifty bank":
                 matched_key = "BANKNIFTY"
-            elif "financial services" in name and "nifty" in name:
+            elif name == "nifty financial services":
                 matched_key = "FINNIFTY"
             elif "midcap select" in name or "mid select" in name:
                 matched_key = "MIDCPNIFTY"
@@ -340,11 +356,19 @@ def download_and_process_day(trade_date, requested_tickers, fetch_fo=True):
         if fo_bytes:
             records, underlying_spots = process_fo_csv(trade_date, fo_bytes, requested_tickers)
 
+    # ALL means every F&O underlying, not every cash-market security. Resolve the
+    # universe from the day's derivatives archive before parsing the much larger
+    # cash and delivery files. This keeps daily SQL bounded to tradable F&O names.
+    effective_tickers = resolve_archive_tickers(requested_tickers, records)
+
     cm_bytes = download_bhavcopy_cm(trade_date)
-    stock_prices = parse_cm_bhavcopy(cm_bytes, requested_tickers)
+    stock_prices = parse_cm_bhavcopy(cm_bytes, effective_tickers)
+    delivery_bytes = download_url(f'https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{trade_date:%d%m%Y}.csv')
+    participation = parse_delivery(delivery_bytes, trade_date, effective_tickers)
+    futures = parse_futures(fo_bytes, trade_date, effective_tickers)
 
     idx_bytes = download_indices_daily(trade_date)
-    index_prices = parse_indices_csv(idx_bytes, requested_tickers)
+    index_prices = parse_indices_csv(idx_bytes, effective_tickers)
 
     # Combine price sessions
     daily_sessions = {}
@@ -366,18 +390,12 @@ def download_and_process_day(trade_date, requested_tickers, fetch_fo=True):
             "close": ohlc["close"],
         }
 
-    # Fallback for instruments in F&O records that missed CM/Index OHLC
-    for rec in records:
-        inst_id = rec["instrument_id"]
-        if inst_id not in daily_sessions and rec["spot"] > 0:
-            sp = rec["spot"]
-            daily_sessions[inst_id] = {
-                "date": trade_date_iso,
-                "open": sp,
-                "high": sp,
-                "low": sp,
-                "close": sp,
-            }
+    # Never fabricate an OHLC candle from a single derivative underlying quote.
+    for inst_id, session in daily_sessions.items():
+        session['participation'] = participation.get(inst_id)
+        session['futures'] = futures.get(inst_id, [])
+    if daily_sessions:
+        next(iter(daily_sessions.values()))['sector_prices'] = parse_sector_prices(idx_bytes, trade_date)
 
     has_data = bool(records or daily_sessions or fo_bytes or cm_bytes)
     return trade_date, records, daily_sessions, has_data
@@ -430,7 +448,7 @@ def count_weekdays_between(d1, d2):
 
 
 def generate_sql(records, sessions_by_instrument, target_date_strings):
-    statements = []
+    statements = [statement + ';' for statement in DDL]
     latest_metadata = {record["instrument_id"]: record for record in records}
     generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -443,7 +461,7 @@ def generate_sql(records, sessions_by_instrument, target_date_strings):
             instrument_type = record["instrument_type"]
             strike_step = record["strike_step"]
         else:
-            ticker = instrument_id[4:-3] if instrument_id.startswith("NSE:") and instrument_id.endswith("-EQ") else instrument_id
+            ticker = next((key for key, value in INDEX_SYMBOLS.items() if value[0] == instrument_id), instrument_id[4:-3] if instrument_id.startswith("NSE:") and instrument_id.endswith("-EQ") else instrument_id)
             _, display_name, instrument_type, strike_step = symbol_metadata(ticker)
 
         statements.append(
@@ -456,8 +474,10 @@ def generate_sql(records, sessions_by_instrument, target_date_strings):
 
     # 2. Daily Price Sessions (market_sessions) with Wilder's ATR-14
     for instrument_id, sessions in sorted(sessions_by_instrument.items()):
+        sessions = sorted({s['date']: s for s in sessions}.values(), key=lambda s: s['date'])
         compute_atr14_series(sessions)
         for s in sessions:
+            statements.extend(evidence_sql(instrument_id, s))
             # Include sessions that are either in the target window or have computed ATR
             session_id = f"{instrument_id}:{s['date']}"
             atr_val = number(s["atr14"]) if s.get("atr14") is not None else "NULL"
@@ -542,7 +562,7 @@ def main():
     today = datetime.date.today()
     max_lookback = max(args.days * 3 + 30, 60)
     target_sessions = args.days
-    warmup_sessions = args.warmup if target_sessions < 50 else 0
+    warmup_sessions = max(25, args.warmup) if target_sessions < 50 else 0
 
     print(f"Scanning for {target_sessions} trading sessions (with {warmup_sessions} warm-up sessions for ATR-14)...")
 
@@ -583,13 +603,17 @@ def main():
     sorted_found_dates = sorted(found_trading_days, reverse=True)
     valid_target_dates = sorted_found_dates[:target_sessions]
 
+    # Resolve ALL once from the target F&O records so warm-up downloads stay on
+    # the same bounded derivatives universe even though they intentionally skip FO.
+    resolved_tickers = resolve_archive_tickers(tickers, records)
+
     # If we need warm-up price sessions for accurate ATR-14, fetch CM/Index data for prior weekdays
     if warmup_sessions > 0 and valid_target_dates:
         earliest_target = min(valid_target_dates)
         warmup_candidates = [d for d in weekdays if d < earliest_target][:warmup_sessions + 5]
         with ThreadPoolExecutor(max_workers=workers) as executor:
             warmup_futures = [
-                executor.submit(download_and_process_day, date, tickers, False)
+                executor.submit(download_and_process_day, date, resolved_tickers, False)
                 for date in warmup_candidates
             ]
             for future in as_completed(warmup_futures):
@@ -629,6 +653,7 @@ def main():
         sessions_by_instrument[inst_id].sort(key=lambda s: s["date"])
 
     statements = generate_sql(target_records, sessions_by_instrument, target_date_strings)
+    statements.extend(membership_sql(download_url))
     if not statements:
         statements = ["-- Market closed, holiday, or no new updates\nSELECT 1;"]
 

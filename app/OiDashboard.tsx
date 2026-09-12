@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { ResistanceScreener } from '@/components/ResistanceScreener';
+import { PositionWatchlist } from '@/components/PositionWatchlist';
 import type { ConfluenceDetail, LevelSignal, MarketAnalysis, ModelComparisonReport, ModelReport, CurrentConfluenceReport, TimeframeAnalysis } from '@/lib/market-types';
 import type { FeatureThresholds, WallStats } from '@/lib/wall-backtest';
 import type { QuarterStats } from '@/lib/history-store';
@@ -271,14 +271,11 @@ function SymbolSearch({
   fyersConnected: boolean;
 }) {
   const matchedOption = options.find((opt) => opt.symbol === value);
-  const [query, setQuery] = useState(matchedOption?.label ?? value);
+  const [queryDraft, setQuery] = useState<string | null>(null);
+  const query = queryDraft ?? matchedOption?.label ?? value;
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const opt = options.find((o) => o.symbol === value);
-    if (opt) setQuery(opt.label);
-  }, [value, options]);
 
   const q = query.trim().toUpperCase();
   const filtered = q.length === 0 ? options.slice(0, 12) : options.filter(
@@ -377,7 +374,7 @@ function SymbolSearch({
 }
 
 export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
-  const [activeView, setActiveView] = useState<'levels' | 'screener'>('levels');
+  const [activeView, setActiveView] = useState<'levels' | 'watchlist'>('levels');
   const [analysis, setAnalysis] = useState<DashboardAnalysis>(initial);
   const [symbol, setSymbol] = useState(initial.snapshot.symbol);
   const [instrumentOptions, setInstrumentOptions] = useState<InstrumentOption[]>(indexFallback);
@@ -586,6 +583,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
               </div>
             </div>
 
+            <Button variant={activeView === 'watchlist' ? 'default' : 'outline'} onClick={() => setActiveView('watchlist')}>Stock Watchlists</Button>
             {/* Navigation Tabs */}
             <div className="flex items-center rounded-xl border border-border/70 bg-card/90 p-1 text-xs shadow-inner">
               <button
@@ -599,28 +597,6 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
               >
                 <Activity className="size-3.5" />
                 Level Map
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveView('screener')}
-                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 font-bold transition-all ${
-                  activeView === 'screener'
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                <Zap className="size-3.5 text-amber-400" />
-                Resistance Screener
-                <Badge
-                  variant="outline"
-                  className={`ml-1 text-[9px] px-1 py-0 font-mono ${
-                    activeView === 'screener'
-                      ? 'border-primary-foreground/30 bg-primary-foreground/10 text-primary-foreground'
-                      : 'border-amber-400/30 text-amber-300'
-                  }`}
-                >
-                  Method 2
-                </Badge>
               </button>
             </div>
           </div>
@@ -637,9 +613,9 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
             <div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Redirect URL in FYERS:</strong><br /><span className="break-all font-mono text-[11px]">{fyersRedirectUrl || 'Loading local callback URL…'}</span><p className="mt-2">Copy this exact URL into your FYERS API app. This local-only site uses localhost, not the old cloud URL.</p></div>
             <form className="mt-5 grid gap-4" onSubmit={saveFyersSetup}>
               <label htmlFor="fyers-app-id" className="grid gap-1.5 text-xs font-bold">App ID</label>
-              <div className="relative"><Input id="fyers-app-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showAppId ? 'none' : 'disc' }} type="text" value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showAppId ? 'Hide App ID' : 'Show App ID'} title={showAppId ? 'Hide App ID' : 'Show App ID'} onClick={() => setShowAppId((visible) => !visible)}>{showAppId ? <EyeOff /> : <Eye />}</Button></div>
+              <div className="relative"><Input id="fyers-app-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showAppId ? 'none' : 'disc' } as React.CSSProperties & { WebkitTextSecurity: string }} type="text" value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showAppId ? 'Hide App ID' : 'Show App ID'} title={showAppId ? 'Hide App ID' : 'Show App ID'} onClick={() => setShowAppId((visible) => !visible)}>{showAppId ? <EyeOff /> : <Eye />}</Button></div>
               <label htmlFor="fyers-secret-id" className="grid gap-1.5 text-xs font-bold">Secret ID</label>
-              <div className="relative"><Input id="fyers-secret-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showSecretId ? 'none' : 'disc' }} type="text" value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} title={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} onClick={() => setShowSecretId((visible) => !visible)}>{showSecretId ? <EyeOff /> : <Eye />}</Button></div>
+              <div className="relative"><Input id="fyers-secret-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showSecretId ? 'none' : 'disc' } as React.CSSProperties & { WebkitTextSecurity: string }} type="text" value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} title={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} onClick={() => setShowSecretId((visible) => !visible)}>{showSecretId ? <EyeOff /> : <Eye />}</Button></div>
               <Button type="submit" size="lg" disabled={setupSaving}>{setupSaving ? <RefreshCw className="animate-spin" data-icon="inline-start" /> : <PlugZap data-icon="inline-start" />}{setupSaving ? 'Connecting…' : 'Save and login with FYERS'}</Button>
               {fyers.configured && <Button type="button" variant="ghost" className="text-muted-foreground" onClick={() => void forgetFyersSetup()}>Forget saved FYERS setup</Button>}
             </form>
@@ -669,14 +645,8 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
           </div>
         )}
 
-        {activeView === 'screener' ? (
-          <ResistanceScreener
-            onSelectSymbol={(sym) => {
-              setSymbol(sym);
-              setActiveView('levels');
-              void load(sym);
-            }}
-          />
+        {activeView === 'watchlist' ? (
+          <PositionWatchlist onSelectSymbol={(sym) => { setSymbol(sym); setActiveView('levels'); void load(sym); }} />
         ) : (
           <>
             <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">

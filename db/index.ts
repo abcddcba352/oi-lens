@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './schema';
+import { evidenceDDL } from './evidence';
 
 let schemaReady: Promise<void> | null = null;
 
@@ -26,6 +27,7 @@ export async function ensureDbSchema() {
   if (schemaReady) return schemaReady;
 
   const statements = [
+    ...evidenceDDL,
     `CREATE TABLE IF NOT EXISTS instruments (
       id TEXT PRIMARY KEY NOT NULL, symbol TEXT NOT NULL, display_name TEXT NOT NULL,
       instrument_type TEXT NOT NULL, strike_step REAL NOT NULL, updated_at TEXT NOT NULL

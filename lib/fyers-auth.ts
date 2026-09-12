@@ -7,7 +7,6 @@ const THIRTY_DAYS = 30 * ONE_DAY;
 // Local development can operate without configuration, but its encrypted
 // cookies intentionally expire whenever the server restarts. Set
 // OI_COOKIE_SECRET to a long random value to retain them across restarts.
-let EPHEMERAL_COOKIE_SECRET: string | undefined;
 
 interface FyersCredentials {
   appId: string;

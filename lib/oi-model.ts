@@ -323,6 +323,7 @@ function maxPain(snapshot: MarketSnapshot) {
 }
 
 interface ScoredCandidate extends Candidate {
+  isPrimary?: boolean;
   rank: number;
   probability: number | null;
   score: number;
