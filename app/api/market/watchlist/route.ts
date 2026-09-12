@@ -1,6 +1,6 @@
 import { ensureDbSchema, getDb } from '@/db';
 import { instruments, marketSessions } from '@/db/schema';
-import { and, gte, lte, asc, sql } from 'drizzle-orm';
+import { and, gte, lte, asc, ne, sql } from 'drizzle-orm';
 import { env } from 'cloudflare:workers';
 import { buildEvidence, type Participation, type FutureRow, type Membership, type SectorPrice } from '@/lib/watchlist-evidence';
 import { cleanCandles, evaluateWatchlist, type WatchCandle, type WatchCandidate } from '@/lib/position-watchlist';
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
         open: marketSessions.open, high: marketSessions.high, low: marketSessions.low,
         close: marketSessions.close, source: marketSessions.source,
       }).from(marketSessions).where(and(gte(marketSessions.sessionDate, start), lte(marketSessions.sessionDate, asOf),
-        sql`${marketSessions.source} = 'nse-bhavcopy'`, sql`(${marketSessions.instrumentId} = 'NSE:NIFTY50-INDEX' or exists (select 1 from oi_snapshots where instrument_id = ${marketSessions.instrumentId}))`)).orderBy(asc(marketSessions.sessionDate)).limit(100001),
+        ne(marketSessions.source, 'demo'), sql`(${marketSessions.instrumentId} = 'NSE:NIFTY50-INDEX' or exists (select 1 from oi_snapshots where instrument_id = ${marketSessions.instrumentId}))`)).orderBy(asc(marketSessions.sessionDate)).limit(100001),
       env.DB.prepare('SELECT * FROM cash_participation c WHERE date BETWEEN ? AND ? AND EXISTS (SELECT 1 FROM oi_snapshots s WHERE s.instrument_id=c.symbol) LIMIT 100001').bind(start, asOf).all<Participation>(),
       env.DB.prepare("SELECT * FROM futures_daily WHERE date BETWEEN date(?, '-10 days') AND ? LIMIT 20001").bind(asOf, asOf).all<FutureRow>(),
       env.DB.prepare('SELECT m.* FROM sector_membership m WHERE m.observed_date = (SELECT MAX(i.observed_date) FROM sector_imports i WHERE i.benchmark=m.benchmark AND i.observed_date<=?)').bind(asOf).all<Membership>(),
