@@ -6,7 +6,8 @@ is a technical research shortlist, not a fundamentals-based investment recommend
 
 ## Rules
 
-- Minimum history: 60 / 130 valid sessions for short / positional.
+- Minimum history: 60 / 120 valid sessions for short / positional. Six calendar
+  months normally contain about 120â€“126 NSE trading sessions.
 - Price must exceed a rising 20 / 50-session moving average.
 - Prior 20 / 40-session highs define resistance, excluding the evaluated candle.
 - Trigger: resistance + 0.25 prior ATR. Invalidation: prior 10-session low − 0.25 ATR.
@@ -56,6 +57,12 @@ and application schema initialization create them idempotently.
 The nightly workflow will use these changes after they are committed/published.
 Tests: `python -m unittest discover -s tests -p test_nse_evidence.py` and `npm test`.
 
+The database uses a rolling 183-calendar-day retention window. Each successful
+import removes older OI strikes, snapshots, outcomes, price candles and evidence
+rows in foreign-key-safe order before inserting new dates. Option chains retain
+the 30 strikes nearest spot; distant strikes are not needed for the wall model.
+This also means `--days 183` cannot refill dates outside the retention cutoff.
+
 The rules require walk-forward testing with several years of point-in-time data,
 corporate-action adjustments, delisted instruments, transaction costs and purged
 overlapping outcomes before making return or probability claims. Six months of
@@ -64,11 +71,8 @@ input history does not validate a six-month holding strategy.
 ## API
 
 `GET /api/market/watchlist?horizon=short` or `horizon=positional` returns candidates,
-coverage exclusions and missing inputs. Today's candle is excluded conservatively.
+coverage exclusions and missing inputs. The cutoff is the latest completed official
+NSE bhavcopy date.
 The scan has a 100,000-row guard; overflow returns a visible service error rather
 than partial rankings. A full 420-calendar-day universe scan can be expensive;
 production scaling should materialize a daily screening result after ingestion.
-
-The older resistance screener now avoids demo fallback and compares stored
-snapshots against the previous available day with the same expiry. Its per-symbol
-query loop remains a separate scalability limitation.

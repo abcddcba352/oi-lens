@@ -34,7 +34,9 @@ export function evaluateWatchlist(
   horizon: WatchHorizon, asOf: string,
 ): WatchResult {
   const rows = cleanCandles(input, asOf);
-  const minimum = horizon === 'short' ? 60 : 130;
+  // Six calendar months contain roughly 120-126 NSE sessions. Requiring 130
+  // would reject a correctly retained six-month window after normal holidays.
+  const minimum = horizon === 'short' ? 60 : 120;
   const reject = (reason: string): WatchResult => ({ candidate: null, reason });
   if (rows.length < minimum) return reject(`Needs ${minimum} valid sessions`);
   const latest = rows.at(-1)!;

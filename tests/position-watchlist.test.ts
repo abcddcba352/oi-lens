@@ -21,6 +21,10 @@ test('positional needs substantially more history than a short-term screen', () 
   assert.ok(evaluate(history(70)).candidate);
   assert.equal(evaluate(history(70), 'positional').candidate, null);
 });
+test('positional accepts a normal six-calendar-month session count', () => {
+  assert.equal(evaluate(history(119), 'positional').reason, 'Needs 120 valid sessions');
+  assert.ok(evaluate(history(120), 'positional').candidate);
+});
 test('stale data is excluded', () => {
   assert.equal(evaluate(history(), 'short', '2026-01-01').reason, 'Price history is stale');
 });

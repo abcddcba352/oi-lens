@@ -6,10 +6,53 @@ import sys
 import unittest
 import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from nse_evidence import DDL, parse_delivery, parse_futures, evidence_sql
-from backfill_history import resolve_archive_tickers
+from nse_evidence import DDL, parse_delivery, parse_futures, evidence_sql, retention_sql
+from backfill_history import MAX_STORED_STRIKES, generate_sql, resolve_archive_tickers
 
 class EvidenceTest(unittest.TestCase):
+    def test_retention_removes_old_rows_in_dependency_order(self):
+        db = sqlite3.connect(':memory:')
+        for statement in DDL:
+            db.execute(statement)
+        db.executescript('''
+            CREATE TABLE oi_snapshots (id TEXT PRIMARY KEY, captured_at TEXT);
+            CREATE TABLE oi_strikes (id TEXT PRIMARY KEY, snapshot_id TEXT);
+            CREATE TABLE level_outcomes (id TEXT PRIMARY KEY, snapshot_id TEXT, session_date TEXT);
+            CREATE TABLE wall_predictions (id TEXT PRIMARY KEY, snapshot_id TEXT, declared_date TEXT);
+            CREATE TABLE market_sessions (id TEXT PRIMARY KEY, session_date TEXT);
+            CREATE TABLE model_calibrations (id TEXT PRIMARY KEY, lookback_end TEXT);
+            INSERT INTO oi_snapshots VALUES ('old','2026-03-01T10:00:00Z'),('keep','2026-03-12T10:00:00Z');
+            INSERT INTO oi_strikes VALUES ('old-k','old'),('keep-k','keep');
+            INSERT INTO level_outcomes VALUES ('old-o','old','2026-03-01'),('keep-o','keep','2026-03-12');
+            INSERT INTO wall_predictions VALUES ('old-w','old','2026-03-01'),('keep-w','keep','2026-03-12');
+            INSERT INTO market_sessions VALUES ('old-m','2026-03-01'),('keep-m','2026-03-12');
+            INSERT INTO model_calibrations VALUES ('old-c','2026-03-01'),('keep-c','2026-03-12');
+            INSERT INTO cash_participation VALUES ('OLD','2026-03-01',1,1,'test'),('KEEP','2026-03-12',1,1,'test');
+            INSERT INTO futures_daily VALUES ('OLD','2026-03-01','2026-03-20',1,1,1,1,1,1,'test'),('KEEP','2026-03-12','2026-03-20',1,1,1,1,1,1,'test');
+            INSERT INTO sector_prices VALUES ('OLD','2026-03-01',1),('KEEP','2026-03-12',1);
+            INSERT INTO sector_membership VALUES ('OLD','X','2026-03-01'),('KEEP','X','2026-03-12');
+            INSERT INTO sector_imports VALUES ('OLD','2026-03-01'),('KEEP','2026-03-12');
+        ''')
+        for statement in retention_sql('2026-03-12'):
+            db.execute(statement)
+        for table in ('oi_snapshots', 'oi_strikes', 'level_outcomes', 'wall_predictions',
+                      'market_sessions', 'model_calibrations', 'cash_participation',
+                      'futures_daily', 'sector_prices', 'sector_membership', 'sector_imports'):
+            self.assertEqual(db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 1, table)
+
+    def test_stored_chain_is_bounded(self):
+        self.assertEqual(MAX_STORED_STRIKES, 30)
+
+    def test_generator_never_reinserts_sessions_before_retention_cutoff(self):
+        sessions = {'NSE:TCS-EQ': [
+            {'date': '2026-03-11', 'open': 99, 'high': 102, 'low': 98, 'close': 101},
+            {'date': '2026-03-12', 'open': 101, 'high': 104, 'low': 100, 'close': 103},
+        ]}
+        statements = generate_sql([], sessions, set(), '2026-03-12')
+        inserts = [statement for statement in statements if statement.startswith('INSERT INTO market_sessions')]
+        self.assertEqual(len(inserts), 1)
+        self.assertIn('2026-03-12', inserts[0])
+
     def test_all_resolves_to_actual_fo_universe(self):
         records = [
             {'instrument_id': 'NSE:TCS-EQ'},

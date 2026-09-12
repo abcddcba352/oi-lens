@@ -76,7 +76,7 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
       <Button className="mt-4" variant="outline" onClick={() => onSelectSymbol(c.symbol)}>Inspect Level Map</Button>
     </article>)}
     {data && <details className="rounded-xl border border-border p-4 text-sm"><summary>Coverage and methodology</summary>
-      <p className="mt-3">Short-term requires 60 sessions and a rising 20-session average. Positional requires 130 sessions and a rising 50-session average. The prior 20/40 sessions define resistance. ATR is the mean of the prior 14 true ranges; trigger and invalidation use a 0.25 ATR buffer. Relative strength compares matching 20/63-session returns to NIFTY.</p>
+      <p className="mt-3">Short-term requires 60 sessions and a rising 20-session average. Positional requires 120 sessions and a rising 50-session average. The prior 20/40 sessions define resistance. ATR is the mean of the prior 14 true ranges; trigger and invalidation use a 0.25 ATR buffer. Relative strength compares matching 20/63-session returns to NIFTY.</p>
       <p className="mt-2">Reward/risk uses the greater of the last close and breakout trigger as indicative entry, before costs and gaps. Unmapped resistance does not imply unlimited upside. Thresholds are research assumptions; missing inputs are not confirmations.</p>
       <ul className="mt-3 list-inside list-disc">{Object.entries(data.exclusions).map(([reason, count]) => <li key={reason}>{reason}: {count}</li>)}</ul><p className="mt-3">{data.validation}</p>
     </details>}

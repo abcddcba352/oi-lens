@@ -22,7 +22,7 @@ import urllib.request
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from nse_evidence import DDL, parse_delivery, parse_futures, parse_sector_prices, evidence_sql, membership_sql
+from nse_evidence import DDL, parse_delivery, parse_futures, parse_sector_prices, evidence_sql, membership_sql, retention_sql
 
 
 INDEX_SYMBOLS = {
@@ -44,6 +44,9 @@ HEADERS = {
     "Accept": "application/zip,application/octet-stream,text/csv,*/*",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+HISTORY_RETENTION_DAYS = 183
+MAX_STORED_STRIKES = 30
 
 
 def parse_date(value):
@@ -323,7 +326,7 @@ def process_fo_csv(trade_date, zip_bytes, requested_tickers):
         if spot <= 0:
             continue
         all_strikes = list(group["strikes"])
-        selected = sorted(all_strikes, key=lambda strike: abs(strike - spot))[:50]
+        selected = sorted(all_strikes, key=lambda strike: abs(strike - spot))[:MAX_STORED_STRIKES]
         step = infer_strike_step(selected)
         instrument_id, display_name, instrument_type, known_step = symbol_metadata(ticker, step)
         records.append(
@@ -447,8 +450,11 @@ def count_weekdays_between(d1, d2):
     return cnt
 
 
-def generate_sql(records, sessions_by_instrument, target_date_strings):
+def generate_sql(records, sessions_by_instrument, target_date_strings, retention_cutoff_date=None):
     statements = [statement + ';' for statement in DDL]
+    statements.append('CREATE INDEX IF NOT EXISTS oi_snapshots_captured_idx ON oi_snapshots(captured_at);')
+    if retention_cutoff_date:
+        statements.extend(retention_sql(retention_cutoff_date))
     latest_metadata = {record["instrument_id"]: record for record in records}
     generated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
@@ -477,6 +483,8 @@ def generate_sql(records, sessions_by_instrument, target_date_strings):
         sessions = sorted({s['date']: s for s in sessions}.values(), key=lambda s: s['date'])
         compute_atr14_series(sessions)
         for s in sessions:
+            if retention_cutoff_date and s['date'] < retention_cutoff_date:
+                continue
             statements.extend(evidence_sql(instrument_id, s))
             # Include sessions that are either in the target window or have computed ATR
             session_id = f"{instrument_id}:{s['date']}"
@@ -638,7 +646,12 @@ def main():
         print("\n[STALENESS WARNING] No NSE data found in the scanned range. Market closed, holiday, or upstream unavailable.")
 
     # Filter records to target dates only
-    target_date_strings = {d.strftime("%Y-%m-%d") for d in valid_target_dates}
+    latest_target_date = max(valid_target_dates) if valid_target_dates else today
+    retention_cutoff_date = (latest_target_date - datetime.timedelta(days=HISTORY_RETENTION_DAYS)).isoformat()
+    target_date_strings = {
+        d.strftime("%Y-%m-%d") for d in valid_target_dates
+        if d.isoformat() >= retention_cutoff_date
+    }
     target_records = [r for r in records if r["trade_date"] in target_date_strings]
 
     # If no records found, output safe SELECT 1; no-op
@@ -652,7 +665,7 @@ def main():
     for inst_id in sessions_by_instrument:
         sessions_by_instrument[inst_id].sort(key=lambda s: s["date"])
 
-    statements = generate_sql(target_records, sessions_by_instrument, target_date_strings)
+    statements = generate_sql(target_records, sessions_by_instrument, target_date_strings, retention_cutoff_date)
     statements.extend(membership_sql(download_url))
     if not statements:
         statements = ["-- Market closed, holiday, or no new updates\nSELECT 1;"]
@@ -666,6 +679,7 @@ def main():
     total_sessions = sum(len(s) for s in sessions_by_instrument.values())
     print(f"Generated {output.resolve()} with {len(statements)} idempotent statements.")
     print(f"Total target trading sessions found: {len(valid_target_dates)}")
+    print(f"Rolling retention cutoff: {retention_cutoff_date} ({HISTORY_RETENTION_DAYS} calendar days)")
     print(f"Total price sessions stored (including ATR warm-up): {total_sessions}")
     for instrument_id in sorted(set(list(oi_counts.keys()) + list(sessions_by_instrument.keys()))):
         oi_c = oi_counts.get(instrument_id, 0)

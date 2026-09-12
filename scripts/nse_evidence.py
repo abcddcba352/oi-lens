@@ -18,11 +18,35 @@ SECTORS = {
 
 DDL = [
     'CREATE TABLE IF NOT EXISTS cash_participation (symbol TEXT NOT NULL, date TEXT NOT NULL, volume REAL NOT NULL, delivery REAL, source TEXT NOT NULL, PRIMARY KEY(symbol,date))',
+    'CREATE INDEX IF NOT EXISTS cash_participation_date_idx ON cash_participation(date)',
     'CREATE TABLE IF NOT EXISTS futures_daily (symbol TEXT NOT NULL, date TEXT NOT NULL, expiry TEXT NOT NULL, close REAL NOT NULL, previous_close REAL NOT NULL, oi REAL NOT NULL, oi_change REAL NOT NULL, volume REAL NOT NULL, lot_size REAL NOT NULL, source TEXT NOT NULL, PRIMARY KEY(symbol,date,expiry))',
+    'CREATE INDEX IF NOT EXISTS futures_daily_date_idx ON futures_daily(date)',
     'CREATE TABLE IF NOT EXISTS sector_prices (benchmark TEXT NOT NULL, date TEXT NOT NULL, close REAL NOT NULL, PRIMARY KEY(benchmark,date))',
+    'CREATE INDEX IF NOT EXISTS sector_prices_date_idx ON sector_prices(date)',
     'CREATE TABLE IF NOT EXISTS sector_membership (symbol TEXT NOT NULL, benchmark TEXT NOT NULL, observed_date TEXT NOT NULL, PRIMARY KEY(symbol,benchmark,observed_date))',
+    'CREATE INDEX IF NOT EXISTS sector_membership_observed_idx ON sector_membership(observed_date)',
     'CREATE TABLE IF NOT EXISTS sector_imports (benchmark TEXT NOT NULL, observed_date TEXT NOT NULL, PRIMARY KEY(benchmark,observed_date))',
+    'CREATE INDEX IF NOT EXISTS sector_imports_observed_idx ON sector_imports(observed_date)',
 ]
+
+
+def retention_sql(cutoff):
+    """Delete data older than cutoff in foreign-key-safe order."""
+    value = text(cutoff)
+    old_snapshots = f"SELECT id FROM oi_snapshots WHERE substr(captured_at,1,10)<{value}"
+    return [
+        f"DELETE FROM level_outcomes WHERE session_date<{value} OR snapshot_id IN ({old_snapshots});",
+        f"DELETE FROM wall_predictions WHERE declared_date<{value} OR snapshot_id IN ({old_snapshots});",
+        f"DELETE FROM oi_strikes WHERE snapshot_id IN ({old_snapshots});",
+        f"DELETE FROM oi_snapshots WHERE substr(captured_at,1,10)<{value};",
+        f"DELETE FROM market_sessions WHERE session_date<{value};",
+        f"DELETE FROM model_calibrations WHERE lookback_end<{value};",
+        f"DELETE FROM cash_participation WHERE date<{value};",
+        f"DELETE FROM futures_daily WHERE date<{value};",
+        f"DELETE FROM sector_prices WHERE date<{value};",
+        f"DELETE FROM sector_membership WHERE observed_date<{value};",
+        f"DELETE FROM sector_imports WHERE observed_date<{value};",
+    ]
 
 def text(value):
     return "'" + str(value).replace("'", "''") + "'"

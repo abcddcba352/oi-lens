@@ -49,6 +49,7 @@ export async function ensureDbSchema() {
       FOREIGN KEY (instrument_id) REFERENCES instruments(id)
     )`,
     `CREATE INDEX IF NOT EXISTS oi_snapshots_instrument_captured_idx ON oi_snapshots(instrument_id, captured_at)`,
+    `CREATE INDEX IF NOT EXISTS oi_snapshots_captured_idx ON oi_snapshots(captured_at)`,
     `CREATE INDEX IF NOT EXISTS oi_snapshots_expiry_idx ON oi_snapshots(expiry_epoch)`,
     `CREATE TABLE IF NOT EXISTS oi_strikes (
       id TEXT PRIMARY KEY NOT NULL, snapshot_id TEXT NOT NULL, strike REAL NOT NULL,
