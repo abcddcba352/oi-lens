@@ -4,6 +4,9 @@ const configPath = 'dist/server/wrangler.json';
 if (fs.existsSync(configPath)) {
   const cfg = JSON.parse(fs.readFileSync(configPath, 'utf8'));
   
+  // Ensure account_id is explicitly set
+  cfg.account_id = 'a94632b49cf1306aa32d0361f75d4991';
+  
   // Deduplicate D1 database bindings
   if (Array.isArray(cfg.d1_databases)) {
     const seen = new Set();
