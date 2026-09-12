@@ -19,6 +19,7 @@
 # misc
 .DS_Store
 *.pem
+powershell.cmd
 
 # debug
 npm-debug.log*

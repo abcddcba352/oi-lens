@@ -15,7 +15,7 @@ if %ERRORLEVEL% NEQ 0 (
 
 echo.
 echo [2/3] Verifying Wrangler configuration...
-node -e "const fs = require('fs'); const p = 'dist/server/wrangler.json'; if (fs.existsSync(p)) { const cfg = JSON.parse(fs.readFileSync(p, 'utf8')); if (Array.isArray(cfg.d1_databases)) { const seen = new Set(); cfg.d1_databases = cfg.d1_databases.filter(d => seen.has(d.binding) ? false : seen.add(d.binding)); } fs.writeFileSync(p, JSON.stringify(cfg, null, 2)); }"
+call node scripts\sanitize_config.js
 
 echo.
 echo [3/3] Publishing to Cloudflare Workers...

@@ -33,25 +33,7 @@ jobs:
         run: npm run build
 
       - name: Verify and deduplicate Wrangler configuration
-        run: |
-          node -e '
-            const fs = require("fs");
-            const configPath = "dist/server/wrangler.json";
-            if (fs.existsSync(configPath)) {
-              const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
-              if (Array.isArray(cfg.d1_databases)) {
-                const seen = new Set();
-                const before = cfg.d1_databases.length;
-                cfg.d1_databases = cfg.d1_databases.filter(item => {
-                  if (seen.has(item.binding)) return false;
-                  seen.add(item.binding);
-                  return true;
-                });
-                console.log(`D1 bindings: cleaned from ${before} to ${cfg.d1_databases.length} unique binding(s)`);
-              }
-              fs.writeFileSync(configPath, JSON.stringify(cfg, null, 2));
-            }
-          '
+        run: node scripts/sanitize_config.js
 
       - name: Deploy to Cloudflare Workers
         env:
