@@ -646,7 +646,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
           </dialog>
         </div>
       )}
-
+      <div className="mx-auto max-w-[1480px] px-4 py-5 sm:px-6 lg:px-8 lg:py-7">
         {error && (
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-300/20 bg-amber-300/[0.07] px-4 py-3 text-sm text-amber-100">
             <div className="flex items-center gap-2">
