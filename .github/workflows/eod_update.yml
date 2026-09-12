@@ -10,10 +10,14 @@ concurrency:
   group: eod-nse-update
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   update-data:
     name: Ingest EOD Bhavcopy & Update D1
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,6 +31,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+
+      - name: Install pinned dependencies
+        run: npm ci
 
       - name: Test NSE evidence parsers
         run: python -m unittest discover -s tests -p test_nse_evidence.py
