@@ -3,10 +3,10 @@ const SESSION_COOKIE = 'oi_fyers_session';
 const CREDENTIALS_COOKIE = 'oi_fyers_credentials';
 const FIFTEEN_MINUTES = 15 * 60;
 const ONE_DAY = 24 * 60 * 60;
-const THIRTY_DAYS = 30 * ONE_DAY;
-// Local development can operate without configuration, but its encrypted
-// cookies intentionally expire whenever the server restarts. Set
-// OI_COOKIE_SECRET to a long random value to retain them across restarts.
+const ONE_YEAR = 365 * ONE_DAY;
+// Production uses the persistent OI_COOKIE_SECRET Worker secret. Development
+// without configuration uses a random process-local key, never a public key.
+let developmentSecret: string | undefined;
 
 interface FyersCredentials {
   appId: string;
@@ -105,6 +105,7 @@ export async function readFyersAuthorization(request: Request) {
   if (!sealed || !credentials) return null;
   try {
     const session = await openValue<FyersSession>(sealed, await sessionKey(request, credentials.secretId));
+    if (sessionExpired(session)) return null;
     return `${credentials.appId}:${session.accessToken}`;
   } catch {
     return null;
@@ -117,7 +118,28 @@ export async function hasFyersSession(request: Request) {
 
 export async function credentialsCookie(request: Request, credentials: FyersCredentials) {
   const sealed = await sealValue(credentials, await credentialKey(request));
-  return serializeCookie(CREDENTIALS_COOKIE, sealed, request, THIRTY_DAYS);
+  return serializeCookie(CREDENTIALS_COOKIE, sealed, request, ONE_YEAR);
+}
+
+export async function renewCredentialsCookie(request: Request) {
+  if (!readCookie(request, CREDENTIALS_COOKIE)) return null;
+  const credentials = await readFyersCredentials(request);
+  return credentials ? credentialsCookie(request, credentials) : null;
+}
+
+function sessionExpired(session: FyersSession) {
+  const connected = Date.parse(session.connectedAt);
+  if (!session.accessToken || !Number.isFinite(connected) || Date.now() >= connected + ONE_DAY * 1000) return true;
+  // FYERS may expire its token before our cookie expires. Inspect the provider
+  // expiry only to reject stale sessions; this is not JWT signature validation.
+  const payload = session.accessToken.split('.')[1];
+  if (payload) {
+    try {
+      const claims = JSON.parse(new TextDecoder().decode(fromBase64Url(payload))) as { exp?: number };
+      if (typeof claims.exp === 'number' && Date.now() >= claims.exp * 1000) return true;
+    } catch { /* Opaque tokens retain the maximum one-day lifetime. */ }
+  }
+  return false;
 }
 
 export function readFyersState(request: Request) {
@@ -144,7 +166,9 @@ function readCookie(request: Request, name: string) {
   const header = request.headers.get('cookie') ?? '';
   for (const item of header.split(';')) {
     const [key, ...value] = item.trim().split('=');
-    if (key === name) return decodeURIComponent(value.join('='));
+    if (key === name) {
+      try { return decodeURIComponent(value.join('=')); } catch { return null; }
+    }
   }
   return null;
 }
@@ -190,7 +214,12 @@ function cookieSecret() {
   const envSecret = globalThis.process?.env?.OI_COOKIE_SECRET?.trim()
     || (globalThis as unknown as { OI_COOKIE_SECRET?: string }).OI_COOKIE_SECRET
     || (globalThis as unknown as { __env__?: { OI_COOKIE_SECRET?: string } }).__env__?.OI_COOKIE_SECRET;
-  return envSecret || 'oi-lens-prod-fyers-session-secret-v1-stable';
+  if (envSecret) return envSecret;
+  if (globalThis.process?.env?.NODE_ENV === 'production') {
+    throw new Error('Persistent FYERS storage requires the OI_COOKIE_SECRET server secret.');
+  }
+  developmentSecret ??= randomBase64Url(32);
+  return developmentSecret;
 }
 
 async function aesKey(material: string) {

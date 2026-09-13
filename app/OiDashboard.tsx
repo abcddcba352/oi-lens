@@ -387,6 +387,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const [backfillState, setBackfillState] = useState<{ running: boolean; processed: number; total: number } | null>(null);
   const [fyers, setFyers] = useState({ configured: false, connected: initial.snapshot.source === 'fyers', checked: false });
   const [setupOpen, setSetupOpen] = useState(false);
+  const [editingFyersSetup, setEditingFyersSetup] = useState(false);
   const [appId, setAppId] = useState('');
   const [secretId, setSecretId] = useState('');
   const [showAppId, setShowAppId] = useState(false);
@@ -395,6 +396,21 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
   const autoBackfillAttempted = useRef(new Set<string>());
   const initialSource = initial.snapshot.source;
   const initialSymbol = initial.snapshot.symbol;
+
+  useEffect(() => {
+    // Returning to a tab after the broker token expires should offer Connect
+    // using the saved setup, without requiring a page reload or new credentials.
+    const refreshConnection = () => {
+      void fetch('/api/auth/fyers/status', { cache: 'no-store' })
+        .then(async response => {
+          if (!response.ok) return;
+          const status = await response.json() as { configured: boolean; connected: boolean };
+          setFyers({ ...status, checked: true });
+        }).catch(() => undefined);
+    };
+    window.addEventListener('focus', refreshConnection);
+    return () => window.removeEventListener('focus', refreshConnection);
+  }, []);
 
   useEffect(() => {
     void fetch('/api/market/instruments', { cache: 'no-store' })
@@ -537,6 +553,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
       const payload = await response.json() as { error?: string; loginUrl?: string };
       if (!response.ok) throw new Error(payload.error ?? 'Unable to save FYERS setup.');
       setFyers({ configured: true, connected: false, checked: true });
+      setEditingFyersSetup(false);
       setSecretId('');
       if (payload.loginUrl) {
         window.location.href = payload.loginUrl;
@@ -609,16 +626,22 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setSetupOpen(false); }}>
           <dialog open aria-labelledby="fyers-setup-title" className="relative m-0 w-full max-w-md rounded-2xl border border-border bg-card p-5 text-foreground shadow-2xl sm:p-6">
             <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[0.14em] text-primary">Broker connection</p><h2 id="fyers-setup-title" className="font-heading mt-2 text-2xl font-bold">FYERS setup</h2></div><Button variant="ghost" size="icon" aria-label="Close setup" onClick={() => setSetupOpen(false)}><X /></Button></div>
-            <p className="mt-3 text-sm leading-6 text-muted-foreground">Enter the App ID and Secret ID from your FYERS API app. They are encrypted into a protected cookie for this browser only and are never written to the site source or database.</p>
-            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Redirect URL in FYERS:</strong><br /><span className="break-all font-mono text-[11px]">{fyersRedirectUrl || 'Loading local callback URL…'}</span><p className="mt-2">Copy this exact URL into your FYERS API app. This local-only site uses localhost, not the old cloud URL.</p></div>
-            <form className="mt-5 grid gap-4" onSubmit={saveFyersSetup}>
+            <p className="mt-3 text-sm leading-6 text-muted-foreground">Your App ID and Secret ID are saved encrypted in this browser for one year, renewed when you use the site. After your FYERS session expires, click Connect FYERS to sign in again using the saved setup. Clearing site cookies or using another browser requires setup again.</p>
+            {fyers.configured && !editingFyersSetup && <div className="mt-4 grid gap-3 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.06] p-4">
+              <p className="text-sm font-semibold text-emerald-200">FYERS setup saved on this browser</p>
+              <Button type="button" onClick={() => window.location.assign('/api/auth/fyers/login')}><PlugZap data-icon="inline-start" />{fyers.connected ? 'Reconnect FYERS' : 'Connect FYERS'}</Button>
+              <Button type="button" variant="ghost" onClick={() => setEditingFyersSetup(true)}>Change App ID / Secret ID</Button>
+            </div>}
+            <div className="mt-4 rounded-lg border border-primary/20 bg-primary/[0.06] p-3 text-xs leading-5 text-muted-foreground"><strong className="text-foreground">Redirect URL in FYERS:</strong><br /><span className="break-all font-mono text-[11px]">{fyersRedirectUrl || 'Loading callback URL…'}</span><p className="mt-2">Use this exact URL in your FYERS API app.</p></div>
+            {(!fyers.configured || editingFyersSetup) && <form className="mt-5 grid gap-4" onSubmit={saveFyersSetup}>
               <label htmlFor="fyers-app-id" className="grid gap-1.5 text-xs font-bold">App ID</label>
               <div className="relative"><Input id="fyers-app-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showAppId ? 'none' : 'disc' } as React.CSSProperties & { WebkitTextSecurity: string }} type="text" value={appId} onChange={(event) => setAppId(event.target.value)} placeholder="Your FYERS App ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showAppId ? 'Hide App ID' : 'Show App ID'} title={showAppId ? 'Hide App ID' : 'Show App ID'} onClick={() => setShowAppId((visible) => !visible)}>{showAppId ? <EyeOff /> : <Eye />}</Button></div>
               <label htmlFor="fyers-secret-id" className="grid gap-1.5 text-xs font-bold">Secret ID</label>
               <div className="relative"><Input id="fyers-secret-id" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="h-10 pr-11 font-mono" style={{ WebkitTextSecurity: showSecretId ? 'none' : 'disc' } as React.CSSProperties & { WebkitTextSecurity: string }} type="text" value={secretId} onChange={(event) => setSecretId(event.target.value)} placeholder="Your FYERS Secret ID" autoComplete="off" spellCheck="false" required /><Button type="button" variant="ghost" size="icon" className="absolute inset-y-0 right-0 h-10 w-10" aria-label={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} title={showSecretId ? 'Hide Secret ID' : 'Show Secret ID'} onClick={() => setShowSecretId((visible) => !visible)}>{showSecretId ? <EyeOff /> : <Eye />}</Button></div>
               <Button type="submit" size="lg" disabled={setupSaving}>{setupSaving ? <RefreshCw className="animate-spin" data-icon="inline-start" /> : <PlugZap data-icon="inline-start" />}{setupSaving ? 'Connecting…' : 'Save and login with FYERS'}</Button>
-              {fyers.configured && <Button type="button" variant="ghost" className="text-muted-foreground" onClick={() => void forgetFyersSetup()}>Forget saved FYERS setup</Button>}
-            </form>
+              {fyers.configured && <Button type="button" variant="ghost" onClick={() => { setEditingFyersSetup(false); setAppId(''); setSecretId(''); }}>Cancel changes</Button>}
+            </form>}
+            {fyers.configured && <Button type="button" variant="ghost" className="mt-4 text-muted-foreground" onClick={() => void forgetFyersSetup()}>Forget saved FYERS setup</Button>}
           </dialog>
         </div>
       )}
@@ -629,17 +652,17 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
               <TriangleAlert className="size-4 shrink-0 text-amber-400" />
               <span>
                 {error.includes('authenticate the user')
-                  ? 'Your daily FYERS session has expired (FYERS tokens reset every 24 hours). Click "Disconnect FYERS" to use stored data, or reconnect.'
+                  ? 'Your FYERS session has expired. Click Connect FYERS to sign in again using your saved setup.'
                   : error}
               </span>
             </div>
             {error.includes('authenticate the user') && (
               <button
                 type="button"
-                onClick={() => void disconnectFyers()}
+                onClick={() => fyers.configured ? window.location.assign('/api/auth/fyers/login') : setSetupOpen(true)}
                 className="rounded-lg border border-amber-400/40 bg-amber-400/15 px-3 py-1 text-xs font-semibold text-amber-200 transition-colors hover:bg-amber-400/25"
               >
-                Disconnect FYERS
+                Connect FYERS
               </button>
             )}
           </div>
