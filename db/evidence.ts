@@ -9,4 +9,6 @@ export const evidenceDDL = [
   'CREATE INDEX IF NOT EXISTS sector_membership_observed_idx ON sector_membership(observed_date)',
   'CREATE TABLE IF NOT EXISTS sector_imports (benchmark TEXT NOT NULL, observed_date TEXT NOT NULL, PRIMARY KEY(benchmark,observed_date))',
   'CREATE INDEX IF NOT EXISTS sector_imports_observed_idx ON sector_imports(observed_date)',
+  'CREATE TABLE IF NOT EXISTS watchlist_snapshots (id TEXT PRIMARY KEY, horizon TEXT NOT NULL, as_of TEXT NOT NULL, generated_at TEXT NOT NULL, methodology_version TEXT NOT NULL, scanned_count INTEGER NOT NULL, priority_count INTEGER NOT NULL, developing_count INTEGER NOT NULL, incomplete_count INTEGER NOT NULL, excluded_count INTEGER NOT NULL, payload_json TEXT NOT NULL)',
+  'CREATE INDEX IF NOT EXISTS watchlist_snapshots_lookup_idx ON watchlist_snapshots(horizon, as_of)',
 ];

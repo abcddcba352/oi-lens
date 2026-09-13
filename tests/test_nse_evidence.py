@@ -32,12 +32,13 @@ class EvidenceTest(unittest.TestCase):
             INSERT INTO sector_prices VALUES ('OLD','2026-03-01',1),('KEEP','2026-03-12',1);
             INSERT INTO sector_membership VALUES ('OLD','X','2026-03-01'),('KEEP','X','2026-03-12');
             INSERT INTO sector_imports VALUES ('OLD','2026-03-01'),('KEEP','2026-03-12');
+            INSERT INTO watchlist_snapshots VALUES ('old','short','2026-03-01','2026-03-01T00:00:00Z','2.0.0',1,0,0,0,1,'{}'),('keep','short','2026-03-12','2026-03-12T00:00:00Z','2.0.0',1,0,0,0,1,'{}');
         ''')
         for statement in retention_sql('2026-03-12'):
             db.execute(statement)
         for table in ('oi_snapshots', 'oi_strikes', 'level_outcomes', 'wall_predictions',
                       'market_sessions', 'model_calibrations', 'cash_participation',
-                      'futures_daily', 'sector_prices', 'sector_membership', 'sector_imports'):
+                      'futures_daily', 'sector_prices', 'sector_membership', 'sector_imports', 'watchlist_snapshots'):
             self.assertEqual(db.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0], 1, table)
 
     def test_stored_chain_is_bounded(self):

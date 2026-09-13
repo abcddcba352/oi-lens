@@ -64,3 +64,19 @@ export const modelCalibrations = sqliteTable('model_calibrations', {
   lookbackStart: text('lookback_start').notNull(), lookbackEnd: text('lookback_end').notNull(), samples: integer('samples').notNull(), validationSamples: integer('validation_samples').notNull(),
   balancedAccuracy: real('balanced_accuracy'), brierScore: real('brier_score'), coefficientsJson: text('coefficients_json').notNull(),
 }, (table) => [index('model_calibrations_instrument_trained_idx').on(table.instrumentId, table.trainedAt)]);
+
+export const watchlistSnapshots = sqliteTable('watchlist_snapshots', {
+  id: text('id').primaryKey(), // e.g. "short:2026-09-12"
+  horizon: text('horizon').notNull(), // 'short' | 'positional'
+  asOf: text('as_of').notNull(),
+  generatedAt: text('generated_at').notNull(),
+  methodologyVersion: text('methodology_version').notNull(),
+  scannedCount: integer('scanned_count').notNull(),
+  priorityCount: integer('priority_count').notNull(),
+  developingCount: integer('developing_count').notNull(),
+  incompleteCount: integer('incomplete_count').notNull(),
+  excludedCount: integer('excluded_count').notNull(),
+  payloadJson: text('payload_json').notNull(),
+}, (table) => [
+  index('watchlist_snapshots_horizon_asof_idx').on(table.horizon, table.asOf),
+]);
