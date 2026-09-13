@@ -48,10 +48,35 @@ class EvidenceTest(unittest.TestCase):
             {'date': '2026-03-11', 'open': 99, 'high': 102, 'low': 98, 'close': 101},
             {'date': '2026-03-12', 'open': 101, 'high': 104, 'low': 100, 'close': 103},
         ]}
-        statements = generate_sql([], sessions, set(), '2026-03-12')
+        statements = generate_sql([], sessions, {'2026-03-11', '2026-03-12'}, '2026-03-12')
         inserts = [statement for statement in statements if statement.startswith('INSERT INTO market_sessions')]
         self.assertEqual(len(inserts), 1)
         self.assertIn('2026-03-12', inserts[0])
+
+    def test_generator_does_not_write_probe_or_atr_warmup_sessions(self):
+        sessions = {'NSE:TCS-EQ': [
+            {'date': '2026-09-09', 'open': 99, 'high': 102, 'low': 98, 'close': 101},
+            {'date': '2026-09-10', 'open': 101, 'high': 104, 'low': 100, 'close': 103},
+            {'date': '2026-09-11', 'open': 103, 'high': 106, 'low': 102, 'close': 105},
+        ]}
+        statements = generate_sql([], sessions, {'2026-09-11'}, '2026-03-12')
+        inserts = [statement for statement in statements if statement.startswith('INSERT INTO market_sessions')]
+        self.assertEqual(len(inserts), 1)
+        self.assertIn('2026-09-11', inserts[0])
+
+    def test_price_history_only_sql_does_not_rewrite_large_evidence_tables(self):
+        sessions = {'NSE:TCS-EQ': [
+            {'date': '2026-09-11', 'open': 3000, 'high': 3050, 'low': 2980, 'close': 3030},
+        ]}
+        statements = generate_sql(
+            [], sessions, {'2026-09-11'}, '2026-03-12',
+            include_evidence=False, update_existing_sessions=False,
+        )
+        market_insert = next(statement for statement in statements if statement.startswith('INSERT INTO market_sessions'))
+        self.assertIn('ON CONFLICT(id) DO NOTHING', market_insert)
+        self.assertFalse(any(statement.startswith('INSERT INTO cash_participation') for statement in statements))
+        self.assertFalse(any(statement.startswith('INSERT INTO futures_daily') for statement in statements))
+        self.assertFalse(any(statement.startswith('INSERT OR IGNORE INTO oi_snapshots') for statement in statements))
 
     def test_all_resolves_to_actual_fo_universe(self):
         records = [

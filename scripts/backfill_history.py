@@ -347,7 +347,7 @@ def process_fo_csv(trade_date, zip_bytes, requested_tickers):
     return records, underlying_spots
 
 
-def download_and_process_day(trade_date, requested_tickers, fetch_fo=True):
+def download_and_process_day(trade_date, requested_tickers, fetch_fo=True, include_evidence=True):
     """Download F&O bhavcopy (if requested), Cash bhavcopy, and Indices summary for trade_date."""
     trade_date_iso = trade_date.strftime("%Y-%m-%d")
     records = []
@@ -366,9 +366,12 @@ def download_and_process_day(trade_date, requested_tickers, fetch_fo=True):
 
     cm_bytes = download_bhavcopy_cm(trade_date)
     stock_prices = parse_cm_bhavcopy(cm_bytes, effective_tickers)
-    delivery_bytes = download_url(f'https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{trade_date:%d%m%Y}.csv')
-    participation = parse_delivery(delivery_bytes, trade_date, effective_tickers)
-    futures = parse_futures(fo_bytes, trade_date, effective_tickers)
+    participation = {}
+    futures = {}
+    if include_evidence:
+        delivery_bytes = download_url(f'https://nsearchives.nseindia.com/products/content/sec_bhavdata_full_{trade_date:%d%m%Y}.csv')
+        participation = parse_delivery(delivery_bytes, trade_date, effective_tickers)
+        futures = parse_futures(fo_bytes, trade_date, effective_tickers)
 
     idx_bytes = download_indices_daily(trade_date)
     index_prices = parse_indices_csv(idx_bytes, effective_tickers)
@@ -450,7 +453,14 @@ def count_weekdays_between(d1, d2):
     return cnt
 
 
-def generate_sql(records, sessions_by_instrument, target_date_strings, retention_cutoff_date=None):
+def generate_sql(
+    records,
+    sessions_by_instrument,
+    target_date_strings,
+    retention_cutoff_date=None,
+    include_evidence=True,
+    update_existing_sessions=True,
+):
     statements = [statement + ';' for statement in DDL]
     statements.append('CREATE INDEX IF NOT EXISTS oi_snapshots_captured_idx ON oi_snapshots(captured_at);')
     if retention_cutoff_date:
@@ -483,20 +493,29 @@ def generate_sql(records, sessions_by_instrument, target_date_strings, retention
         sessions = sorted({s['date']: s for s in sessions}.values(), key=lambda s: s['date'])
         compute_atr14_series(sessions)
         for s in sessions:
+            # Probe padding and ATR warm-up sessions are calculation inputs only.
+            # Rewriting them on every daily run wastes D1's row-write allowance.
+            if s['date'] not in target_date_strings:
+                continue
             if retention_cutoff_date and s['date'] < retention_cutoff_date:
                 continue
-            statements.extend(evidence_sql(instrument_id, s))
-            # Include sessions that are either in the target window or have computed ATR
+            if include_evidence:
+                statements.extend(evidence_sql(instrument_id, s))
             session_id = f"{instrument_id}:{s['date']}"
             atr_val = number(s["atr14"]) if s.get("atr14") is not None else "NULL"
+            conflict_sql = (
+                "ON CONFLICT(id) DO UPDATE SET "
+                "open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, "
+                "atr14=coalesce(excluded.atr14, market_sessions.atr14), source=excluded.source;"
+                if update_existing_sessions else
+                "ON CONFLICT(id) DO NOTHING;"
+            )
             statements.append(
                 "INSERT INTO market_sessions (id, instrument_id, session_date, open, high, low, close, atr14, source) VALUES "
                 f"({sql_text(session_id)}, {sql_text(instrument_id)}, {sql_text(s['date'])}, "
                 f"{number(s['open'])}, {number(s['high'])}, {number(s['low'])}, {number(s['close'])}, "
                 f"{atr_val}, 'nse-bhavcopy') "
-                "ON CONFLICT(id) DO UPDATE SET "
-                "open=excluded.open, high=excluded.high, low=excluded.low, close=excluded.close, "
-                "atr14=coalesce(excluded.atr14, market_sessions.atr14), source=excluded.source;"
+                + conflict_sql
             )
 
     # 3. OI Snapshots & Strikes
@@ -548,6 +567,19 @@ def discover_trading_dates(target_sessions_count, max_lookback_days=45):
     return candidate_dates
 
 
+def resolve_latest_fo_universe(candidate_dates):
+    """Resolve the current stock-futures universe without building option chains."""
+    for trade_date in candidate_dates[:15]:
+        fo_bytes = download_bhavcopy_fo(trade_date)
+        futures = parse_futures(fo_bytes, trade_date, {'ALL'})
+        if futures:
+            tickers = {ticker_from_instrument_id(instrument_id) for instrument_id in futures}
+            # Indices do not use the STF futures rows parsed above, but their daily
+            # candles are required as benchmarks and should be included with ALL.
+            return tickers.union(INDEX_SYMBOLS), trade_date
+    raise RuntimeError('Unable to resolve the current NSE F&O universe from recent archives.')
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prepare official NSE EOD option OI and daily price history for Cloudflare D1.")
     parser.add_argument(
@@ -558,6 +590,11 @@ def main():
     parser.add_argument("--days", type=int, default=183, help="Trading-session count to ingest (default: 183)")
     parser.add_argument("--workers", type=int, default=4, help="Parallel NSE downloads, 1-6 (default: 4)")
     parser.add_argument("--output", default="nse_oi_backfill.sql", help="Generated SQL path")
+    parser.add_argument(
+        "--price-history-only",
+        action="store_true",
+        help="Backfill daily OHLC for the current F&O universe without rewriting option snapshots or evidence tables",
+    )
     parser.add_argument("--warmup", type=int, default=16, help="Prior sessions for ATR-14 warm-up calculation (default: 16)")
     args = parser.parse_args()
 
@@ -570,7 +607,7 @@ def main():
     today = datetime.date.today()
     max_lookback = max(args.days * 3 + 30, 60)
     target_sessions = args.days
-    warmup_sessions = max(25, args.warmup) if target_sessions < 50 else 0
+    warmup_sessions = 0 if args.price_history_only else max(25, args.warmup) if target_sessions < 50 else 0
 
     print(f"Scanning for {target_sessions} trading sessions (with {warmup_sessions} warm-up sessions for ATR-14)...")
 
@@ -589,6 +626,11 @@ def main():
         cur -= datetime.timedelta(days=1)
         checked_days += 1
 
+    scan_tickers = tickers
+    if args.price_history_only and "ALL" in tickers:
+        scan_tickers, universe_date = resolve_latest_fo_universe(weekdays)
+        print(f"Resolved {len(scan_tickers)} current F&O underlyings/indices from {universe_date}.")
+
     # First pass: probe target dates with F&O
     records = []
     sessions_by_instrument = {}
@@ -597,7 +639,13 @@ def main():
     with ThreadPoolExecutor(max_workers=workers) as executor:
         # Submit first batch of candidate weekdays
         futures = {
-            executor.submit(download_and_process_day, date, tickers, True): date
+            executor.submit(
+                download_and_process_day,
+                date,
+                scan_tickers,
+                not args.price_history_only,
+                not args.price_history_only,
+            ): date
             for date in weekdays[: target_sessions + 10]
         }
         for future in as_completed(futures):
@@ -613,7 +661,7 @@ def main():
 
     # Resolve ALL once from the target F&O records so warm-up downloads stay on
     # the same bounded derivatives universe even though they intentionally skip FO.
-    resolved_tickers = resolve_archive_tickers(tickers, records)
+    resolved_tickers = scan_tickers if args.price_history_only else resolve_archive_tickers(tickers, records)
 
     # If we need warm-up price sessions for accurate ATR-14, fetch CM/Index data for prior weekdays
     if warmup_sessions > 0 and valid_target_dates:
@@ -665,8 +713,16 @@ def main():
     for inst_id in sessions_by_instrument:
         sessions_by_instrument[inst_id].sort(key=lambda s: s["date"])
 
-    statements = generate_sql(target_records, sessions_by_instrument, target_date_strings, retention_cutoff_date)
-    statements.extend(membership_sql(download_url))
+    statements = generate_sql(
+        target_records,
+        sessions_by_instrument,
+        target_date_strings,
+        retention_cutoff_date,
+        include_evidence=not args.price_history_only,
+        update_existing_sessions=not args.price_history_only,
+    )
+    if not args.price_history_only:
+        statements.extend(membership_sql(download_url))
     if not statements:
         statements = ["-- Market closed, holiday, or no new updates\nSELECT 1;"]
 
@@ -676,14 +732,18 @@ def main():
     for record in target_records:
         oi_counts[record["instrument_id"]] = oi_counts.get(record["instrument_id"], 0) + 1
 
-    total_sessions = sum(len(s) for s in sessions_by_instrument.values())
+    stored_session_counts = {
+        instrument_id: sum(1 for session in sessions if session['date'] in target_date_strings)
+        for instrument_id, sessions in sessions_by_instrument.items()
+    }
+    total_sessions = sum(stored_session_counts.values())
     print(f"Generated {output.resolve()} with {len(statements)} idempotent statements.")
     print(f"Total target trading sessions found: {len(valid_target_dates)}")
     print(f"Rolling retention cutoff: {retention_cutoff_date} ({HISTORY_RETENTION_DAYS} calendar days)")
-    print(f"Total price sessions stored (including ATR warm-up): {total_sessions}")
+    print(f"Total requested price sessions written: {total_sessions}")
     for instrument_id in sorted(set(list(oi_counts.keys()) + list(sessions_by_instrument.keys()))):
         oi_c = oi_counts.get(instrument_id, 0)
-        sess_c = len(sessions_by_instrument.get(instrument_id, []))
+        sess_c = stored_session_counts.get(instrument_id, 0)
         print(f"  {instrument_id}: {oi_c} EOD snapshots, {sess_c} daily price sessions")
 
 

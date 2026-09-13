@@ -63,6 +63,12 @@ rows in foreign-key-safe order before inserting new dates. Option chains retain
 the 30 strikes nearest spot; distant strikes are not needed for the wall model.
 This also means `--days 183` cannot refill dates outside the retention cutoff.
 
+The weekday job writes only its three requested EOD sessions; archive-probing and
+ATR warm-up candles are calculation inputs and are not rewritten. A Sunday
+maintenance run uses `--price-history-only` to fill six-month OHLC coverage for
+the current F&O universe. Existing candles use `ON CONFLICT DO NOTHING`, and the
+maintenance file contains no option strikes or participation/futures rewrites.
+
 The rules require walk-forward testing with several years of point-in-time data,
 corporate-action adjustments, delisted instruments, transaction costs and purged
 overlapping outcomes before making return or probability claims. Six months of
