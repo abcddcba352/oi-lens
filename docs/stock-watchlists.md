@@ -69,6 +69,15 @@ maintenance run uses `--price-history-only` to fill six-month OHLC coverage for
 the current F&O universe. Existing candles use `ON CONFLICT DO NOTHING`, and the
 maintenance file contains no option strikes or participation/futures rewrites.
 
+Saturday maintenance (08:00 IST) fills missing cash delivery/volume, stock-futures
+contracts and sector benchmark closes within the same retention window. It reads
+existing keys, starts with recent gaps, and emits at most 12,000 insert-only rows
+per run. Index writes count separately toward D1 usage. Each subsequent run skips
+stored keys and continues into older gaps; filling the initial backlog can take
+several Saturdays. NSE archive failures remain gaps to retry. Historical sector
+membership is never inferred from today's constituents. This job does not fetch
+fundamentals or create weekend trading candles.
+
 The rules require walk-forward testing with several years of point-in-time data,
 corporate-action adjustments, delisted instruments, transaction costs and purged
 overlapping outcomes before making return or probability claims. Six months of
