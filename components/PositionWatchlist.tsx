@@ -23,7 +23,7 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
     setLoading(true);
     setError(null);
     setData(null);
-    void fetch(`/api/market/watchlist?horizon=${horizon}`, {
+    void fetch(`/api/market/watchlist?horizon=${horizon}${refresh > 0 ? '&force=true' : ''}`, {
       cache: 'no-store',
       signal: controller.signal,
     })
@@ -329,6 +329,9 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
             <p>
               Participation and sector evidence are evaluated separately from the 0–100 technical score. Missing delivery or futures data remains <strong>Unavailable</strong> and is never treated as zero or bearish confirmation.
             </p>
+            <p>
+              OI walls reuse the Level Map selector. Exchange-reported OI change cannot identify buyer versus writer intent by itself. Historical wall counts use completed 10-session outcomes, exclude the current cutoff date, and count at most one wall per side per day.
+            </p>
             <p className="text-amber-200">{data.validation}</p>
           </div>
         </details>
@@ -378,6 +381,19 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
             {c.researchLabel && (
               <span className="rounded border border-border bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                 {c.researchLabel} · Fundamentals {c.fundamentalsStatus ?? 'Unassessed'}
+              </span>
+            )}
+            {c.oiEvidence && (
+              <span className={`rounded border px-2 py-0.5 text-xs font-semibold ${
+                c.oiEvidence.classification === 'OI confirmed'
+                  ? 'border-emerald-500/40 bg-emerald-500/20 text-emerald-300'
+                  : c.oiEvidence.classification === 'OI developing'
+                    ? 'border-sky-500/40 bg-sky-500/20 text-sky-300'
+                    : c.oiEvidence.classification === 'OI conflict'
+                      ? 'border-rose-500/40 bg-rose-500/20 text-rose-300'
+                      : 'border-amber-500/40 bg-amber-500/20 text-amber-300'
+              }`}>
+                {c.oiEvidence.classification}
               </span>
             )}
           </div>
@@ -454,6 +470,87 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
           <dd className="font-medium text-muted-foreground">Not validated</dd>
         </div>
       </dl>
+
+      {c.oiEvidence && (
+        <div className="mt-4 rounded-lg border border-border p-3 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-semibold text-xs uppercase tracking-wider text-muted-foreground">
+              F&amp;O OI Support / Resistance
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {c.oiEvidence.asOf
+                ? `Snapshot ${c.oiEvidence.asOf.slice(0, 10)} · Expiry ${c.oiEvidence.expiry} · ${c.oiEvidence.source}`
+                : 'Snapshot unavailable'}
+            </p>
+          </div>
+
+          <dl className="mt-2 grid grid-cols-1 gap-3 text-xs md:grid-cols-2">
+            <div>
+              <dt className="text-muted-foreground">Primary Put-OI support</dt>
+              <dd className="font-medium">
+                {c.oiEvidence.support ? (
+                  <>
+                    {price(c.oiEvidence.support.strike)} · {c.oiEvidence.support.distanceAtr} ATR away · OI change{' '}
+                    <span className={c.oiEvidence.support.oiChange >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                      {c.oiEvidence.support.oiChange > 0 ? '+' : ''}{c.oiEvidence.support.oiChange.toLocaleString('en-IN')}
+                    </span>
+                  </>
+                ) : <span className="text-amber-200">Unavailable</span>}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-muted-foreground">Primary Call-OI resistance</dt>
+              <dd className="font-medium">
+                {c.oiEvidence.resistance ? (
+                  <>
+                    {price(c.oiEvidence.resistance.strike)} · {c.oiEvidence.resistance.distanceAtr} ATR away · OI change{' '}
+                    <span className={c.oiEvidence.resistance.oiChange <= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                      {c.oiEvidence.resistance.oiChange > 0 ? '+' : ''}{c.oiEvidence.resistance.oiChange.toLocaleString('en-IN')}
+                    </span>
+                  </>
+                ) : <span className="text-amber-200">Unavailable</span>}
+              </dd>
+            </div>
+          </dl>
+
+          {c.oiEvidence.confirmations.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+              {c.oiEvidence.confirmations.map((text, index) => (
+                <span key={index} className="rounded border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-200">
+                  {text}
+                </span>
+              ))}
+            </div>
+          )}
+          {c.oiEvidence.conflicts.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
+              {c.oiEvidence.conflicts.map((text, index) => (
+                <span key={index} className="rounded border border-rose-500/30 bg-rose-500/10 px-2 py-0.5 text-rose-200">
+                  {text}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {c.oiEvidence.historical ? (
+            <div className="mt-3 grid gap-2 border-t border-border/60 pt-2 text-xs md:grid-cols-2">
+              {(['support', 'resistance'] as const).map(side => {
+                const stats = c.oiEvidence!.historical![side];
+                return (
+                  <p key={side}>
+                    <span className="capitalize text-muted-foreground">Past {side} walls:</span>{' '}
+                    {stats.evaluated} evaluated · {stats.reached} reached · {stats.held} held · {stats.broke} broke
+                    {stats.holdRate !== null && ` · ${stats.holdRate}% hold rate after reach`}
+                  </p>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-amber-200">Historical wall outcomes: Unavailable</p>
+          )}
+          <p className="mt-2 text-xs text-muted-foreground">{c.oiEvidence.note}</p>
+        </div>
+      )}
 
       {/* Technical Score Breakdown */}
       <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -589,4 +686,3 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
     </article>
   );
 }
-

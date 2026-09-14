@@ -1,5 +1,6 @@
 /** EOD technical research rules. Scores are NOT fitted probabilities. */
 import type { WatchEvidence, EvidenceCoverage } from './watchlist-evidence';
+import type { WatchOiEvidence } from './watchlist-oi';
 
 export type WatchHorizon = 'short' | 'positional';
 export type WatchlistGroup = 'priority' | 'developing' | 'data_incomplete' | 'excluded';
@@ -89,6 +90,7 @@ export interface WatchCandidate {
   evidenceCoverage?: EvidenceCoverage;
   researchLabel?: string;
   fundamentalsStatus?: 'Unassessed';
+  oiEvidence?: WatchOiEvidence;
 }
 
 export interface WatchResult {
@@ -387,4 +389,3 @@ export function evaluateWatchlist(
 
   return { candidate, reason: null, group };
 }
-

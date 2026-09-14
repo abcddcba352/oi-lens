@@ -15,6 +15,13 @@ import {
   type WatchHorizon,
   DEFAULT_WATCHLIST_THRESHOLDS,
 } from './position-watchlist';
+import type { ChainStrike, MarketSnapshot } from './market-types';
+import {
+  buildWatchOiEvidence,
+  unavailableWatchOiEvidence,
+  watchOiRank,
+  type WatchWallOutcomeRow,
+} from './watchlist-oi';
 
 export interface DataIncompleteCandidate {
   symbol: string;
@@ -61,6 +68,8 @@ interface D1Like {
   };
 }
 
+const WATCHLIST_METHODOLOGY_VERSION = 'v3-oi-walls';
+
 const groupBySymbol = <T extends { symbol: string }>(items: T[]) => {
   const groups = new Map<string, T[]>();
   for (const item of items) {
@@ -70,6 +79,162 @@ const groupBySymbol = <T extends { symbol: string }>(items: T[]) => {
   }
   return groups;
 };
+
+interface SnapshotRow {
+  id: string;
+  instrument_id: string;
+  captured_at: string;
+  expiry: string;
+  expiry_epoch: number | null;
+  spot: number;
+  spot_change_percent: number;
+  atr14: number;
+  iv_percentile: number;
+  source: string;
+  display_name: string;
+  instrument_type: 'index' | 'stock';
+  strike_step: number;
+}
+
+interface StrikeRow extends ChainStrike {
+  snapshot_id: string;
+}
+
+interface OutcomeRow {
+  instrument_id: string;
+  side: 'support' | 'resistance';
+  declared_date: string;
+  captured_at: string;
+  reached: number | null;
+  days_to_reach: number | null;
+  held: number | null;
+  broke: number | null;
+  bounce_points: number | null;
+  bounce_atr: number | null;
+}
+
+const chunks = <T,>(values: T[], size = 60) => {
+  const output: T[][] = [];
+  for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
+  return output;
+};
+
+async function addOiEvidence(d1: D1Like, candidates: WatchCandidate[], asOf: string) {
+  if (!candidates.length) return;
+  const symbols = [...new Set(candidates.map(candidate => candidate.symbol))];
+  const snapshots: SnapshotRow[] = [];
+
+  for (const batch of chunks(symbols)) {
+    const placeholders = batch.map(() => '?').join(',');
+    const result = await d1.prepare(`
+      SELECT s.id, s.instrument_id, s.captured_at, s.expiry, s.expiry_epoch,
+             s.spot, s.spot_change_percent, s.atr14, s.iv_percentile, s.source,
+             i.display_name, i.instrument_type, i.strike_step
+      FROM oi_snapshots s
+      JOIN instruments i ON i.id=s.instrument_id
+      WHERE s.instrument_id IN (${placeholders})
+        AND substr(s.captured_at,1,10)<=?
+        AND NOT EXISTS (
+          SELECT 1 FROM oi_snapshots newer
+          WHERE newer.instrument_id=s.instrument_id
+            AND substr(newer.captured_at,1,10)<=?
+            AND newer.captured_at>s.captured_at
+        )
+    `).bind(...batch, asOf, asOf).all<SnapshotRow>();
+    snapshots.push(...result.results);
+  }
+
+  const strikes: StrikeRow[] = [];
+  for (const batch of chunks(snapshots.map(snapshot => snapshot.id))) {
+    const placeholders = batch.map(() => '?').join(',');
+    const result = await d1.prepare(`
+      SELECT snapshot_id, strike,
+             call_oi AS callOi, call_oi_change AS callOiChange, call_volume AS callVolume, call_iv AS callIv,
+             put_oi AS putOi, put_oi_change AS putOiChange, put_volume AS putVolume, put_iv AS putIv
+      FROM oi_strikes WHERE snapshot_id IN (${placeholders}) ORDER BY snapshot_id, strike
+    `).bind(...batch).all<StrikeRow>();
+    strikes.push(...result.results);
+  }
+
+  const historyStart = new Date(Date.parse(asOf) - 183 * 86_400_000).toISOString().slice(0, 10);
+  const outcomeRows: OutcomeRow[] = [];
+  for (const batch of chunks(symbols)) {
+    const placeholders = batch.map(() => '?').join(',');
+    const result = await d1.prepare(`
+      SELECT wp.instrument_id, wp.side, wp.declared_date, s.captured_at,
+             wp.reached, wp.days_to_reach, wp.held, wp.broke, wp.bounce_points, wp.bounce_atr
+      FROM wall_predictions wp
+      JOIN oi_snapshots s ON s.id=wp.snapshot_id
+      WHERE wp.instrument_id IN (${placeholders})
+        AND wp.declared_date>=? AND wp.declared_date<?
+        AND wp.evaluated_at IS NOT NULL AND wp.evaluation_version=2
+      ORDER BY wp.instrument_id, wp.declared_date, s.captured_at
+    `).bind(...batch, historyStart, asOf).all<OutcomeRow>();
+    outcomeRows.push(...result.results);
+  }
+
+  const strikesBySnapshot = new Map<string, ChainStrike[]>();
+  for (const row of strikes) {
+    const chain = strikesBySnapshot.get(row.snapshot_id) ?? [];
+    chain.push({
+      strike: row.strike,
+      callOi: row.callOi,
+      callOiChange: row.callOiChange,
+      callVolume: row.callVolume,
+      callIv: row.callIv ?? undefined,
+      putOi: row.putOi,
+      putOiChange: row.putOiChange,
+      putVolume: row.putVolume,
+      putIv: row.putIv ?? undefined,
+    });
+    strikesBySnapshot.set(row.snapshot_id, chain);
+  }
+
+  const snapshotBySymbol = new Map<string, MarketSnapshot>();
+  for (const row of snapshots) {
+    const chain = strikesBySnapshot.get(row.id) ?? [];
+    if (!chain.length) continue;
+    snapshotBySymbol.set(row.instrument_id, {
+      symbol: row.instrument_id,
+      displayName: row.display_name,
+      instrumentType: row.instrument_type,
+      spot: row.spot,
+      spotChangePercent: row.spot_change_percent,
+      expiry: row.expiry,
+      expiryEpoch: row.expiry_epoch ?? undefined,
+      strikeStep: row.strike_step,
+      atr14: row.atr14,
+      ivPercentile: row.iv_percentile,
+      asOf: row.captured_at,
+      source: row.source as MarketSnapshot['source'],
+      chain,
+    });
+  }
+
+  const outcomesBySymbol = new Map<string, WatchWallOutcomeRow[]>();
+  for (const row of outcomeRows) {
+    const values = outcomesBySymbol.get(row.instrument_id) ?? [];
+    values.push({
+      side: row.side,
+      declaredDate: row.declared_date,
+      capturedAt: row.captured_at,
+      reached: row.reached === null ? null : row.reached === 1,
+      daysToReach: row.days_to_reach,
+      held: row.held === null ? null : row.held === 1,
+      broke: row.broke === null ? null : row.broke === 1,
+      bouncePoints: row.bounce_points,
+      bounceAtr: row.bounce_atr,
+    });
+    outcomesBySymbol.set(row.instrument_id, values);
+  }
+
+  for (const candidate of candidates) {
+    const snapshot = snapshotBySymbol.get(candidate.symbol);
+    candidate.oiEvidence = snapshot
+      ? buildWatchOiEvidence(candidate, snapshot, outcomesBySymbol.get(candidate.symbol) ?? [], asOf)
+      : unavailableWatchOiEvidence();
+  }
+}
 
 export async function computeWatchlistPayload(
   db: any,
@@ -252,10 +417,24 @@ export async function computeWatchlistPayload(
     }
   }
 
-  // Sort: Priority by technical score desc, then symbol asc
-  prioritySetups.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
-  // Sort: Developing by technical score desc, then symbol asc
-  developingSetups.sort((a, b) => b.score - a.score || a.symbol.localeCompare(b.symbol));
+  const allSetups = [...prioritySetups, ...developingSetups];
+  try {
+    await addOiEvidence(d1, allSetups, asOf);
+  } catch (error) {
+    console.warn('OI watchlist enrichment unavailable', error);
+    for (const candidate of allSetups) {
+      candidate.oiEvidence = unavailableWatchOiEvidence('OI evidence could not be read; the price setup remains available.');
+    }
+  }
+
+  const compare = (a: WatchCandidate, b: WatchCandidate) =>
+    watchOiRank(b.oiEvidence?.classification ?? 'Price only') -
+      watchOiRank(a.oiEvidence?.classification ?? 'Price only') ||
+    (b.oiEvidence?.confirmations.length ?? 0) - (a.oiEvidence?.confirmations.length ?? 0) ||
+    b.score - a.score ||
+    a.symbol.localeCompare(b.symbol);
+  prioritySetups.sort(compare);
+  developingSetups.sort(compare);
 
   const candidates = [...prioritySetups, ...developingSetups];
 
@@ -271,12 +450,12 @@ export async function computeWatchlistPayload(
     generatedAt: new Date().toISOString(),
     source: 'stored-eod',
     missingInputs: [
-      'Fundamentals and valuation are Unassessed. Cash delivery, stock futures and sector coverage are shown per stock.',
+      'Fundamentals and valuation are Unassessed. OI, cash delivery, stock futures and sector coverage are shown per stock.',
     ],
     validation:
       horizon === 'positional'
         ? 'Positional technical research rules. Scores are not win probabilities. Stored history covers up to 183 calendar days and does not validate a 6-month holding strategy.'
-        : 'Short-term technical research rules. Breakouts require hold/retest confirmation and positive volume/OI participation.',
+        : 'Short-term technical research rules. OI wall evidence is a separate confirmation layer and is not a win probability.',
     exclusions,
   };
 }
@@ -291,12 +470,12 @@ export async function materializeOrFetchWatchlist(
   // 1. Attempt fast read from watchlist_snapshots table (< 20ms)
   const existing = await d1
     .prepare(
-      'SELECT payload_json, as_of, generated_at FROM watchlist_snapshots WHERE horizon = ? ORDER BY as_of DESC LIMIT 1',
+      'SELECT payload_json, as_of, generated_at, methodology_version FROM watchlist_snapshots WHERE horizon = ? ORDER BY as_of DESC LIMIT 1',
     )
     .bind(horizon)
-    .first<{ payload_json: string; as_of: string; generated_at: string }>();
+    .first<{ payload_json: string; as_of: string; generated_at: string; methodology_version: string }>();
 
-  if (!forceRefresh && existing && existing.as_of === asOf) {
+  if (!forceRefresh && existing && existing.as_of === asOf && existing.methodology_version === WATCHLIST_METHODOLOGY_VERSION) {
     try {
       return JSON.parse(existing.payload_json) as WatchlistPayload;
     } catch {
@@ -314,9 +493,10 @@ export async function materializeOrFetchWatchlist(
           id, horizon, as_of, generated_at, methodology_version,
           scanned_count, priority_count, developing_count, incomplete_count, excluded_count,
           payload_json
-        ) VALUES (?, ?, ?, ?, 'v2', ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           generated_at = excluded.generated_at,
+          methodology_version = excluded.methodology_version,
           scanned_count = excluded.scanned_count,
           priority_count = excluded.priority_count,
           developing_count = excluded.developing_count,
@@ -329,6 +509,7 @@ export async function materializeOrFetchWatchlist(
         horizon,
         asOf,
         payload.generatedAt,
+        WATCHLIST_METHODOLOGY_VERSION,
         payload.scannedCount,
         payload.prioritySetups.length,
         payload.developingSetups.length,
