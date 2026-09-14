@@ -24,6 +24,7 @@ import {
   watchOiRank,
   type WatchWallOutcomeRow,
 } from './watchlist-oi';
+import type { MarketDayStatus } from './nse-market-calendar';
 
 export interface DataIncompleteCandidate {
   symbol: string;
@@ -58,6 +59,7 @@ export interface WatchlistPayload {
   validation: string;
   exclusions: Record<string, number>;
   staleFallback?: boolean;
+  marketStatus?: MarketDayStatus;
 }
 
 interface D1Like {

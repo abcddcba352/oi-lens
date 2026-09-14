@@ -59,6 +59,17 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
     data?.excluded?.filter(c =>
       `${c.name} ${c.symbol} ${c.reason}`.toLowerCase().includes(query.toLowerCase()),
     ) ?? [];
+  const setupCandidates = data
+    ? [...(data.prioritySetups ?? []), ...(data.developingSetups ?? [])]
+    : [];
+  const missingCounts = data ? {
+    fundamentals: setupCandidates.length,
+    sector: setupCandidates.filter(candidate => candidate.evidence?.sector === null).length,
+    delivery: setupCandidates.filter(candidate => candidate.evidence?.deliveryRatio === null).length,
+    futures: setupCandidates.filter(candidate => candidate.evidence?.futuresPattern === null).length,
+    oi: setupCandidates.filter(candidate => !candidate.oiEvidence?.support || !candidate.oiEvidence?.resistance).length,
+    priceHistory: data.dataIncomplete?.length ?? 0,
+  } : null;
 
   const getStageBadgeClass = (stage: string) => {
     switch (stage) {
@@ -126,6 +137,56 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
           <p className="mt-3 text-xs text-amber-300">
             Notice: Serving cached snapshot from {data.asOf} while new calculation updates.
           </p>
+        )}
+
+        {data?.marketStatus && (
+          <div className={`mt-4 rounded-xl border p-3 ${
+            data.marketStatus.collectionRequired
+              ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+              : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+          }`}>
+            <p className="font-semibold">{data.marketStatus.title}</p>
+            <p className="mt-1 text-sm">{data.marketStatus.detail}</p>
+            <p className="mt-1 text-xs opacity-80">
+              Latest stored EOD: {data.marketStatus.latestEodDate ?? 'Unavailable'}
+            </p>
+          </div>
+        )}
+
+        {data && missingCounts && (
+          <div className="mt-3 rounded-xl border border-border/70 bg-muted/20 p-3 text-sm">
+            <p className="font-semibold text-foreground">What is still missing</p>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <span className="rounded border border-border px-2 py-1">
+                Fundamentals / valuation: {missingCounts.fundamentals}/{setupCandidates.length} setups unassessed
+              </span>
+              {missingCounts.sector > 0 && (
+                <span className="rounded border border-amber-500/30 px-2 py-1 text-amber-200">
+                  Sector history: {missingCounts.sector}/{setupCandidates.length} setups
+                </span>
+              )}
+              {missingCounts.delivery > 0 && (
+                <span className="rounded border border-amber-500/30 px-2 py-1 text-amber-200">
+                  Delivery baseline: {missingCounts.delivery}/{setupCandidates.length} setups
+                </span>
+              )}
+              {missingCounts.futures > 0 && (
+                <span className="rounded border border-amber-500/30 px-2 py-1 text-amber-200">
+                  Futures positioning: {missingCounts.futures}/{setupCandidates.length} setups
+                </span>
+              )}
+              {missingCounts.oi > 0 && (
+                <span className="rounded border border-amber-500/30 px-2 py-1 text-amber-200">
+                  Complete OI walls: {missingCounts.oi}/{setupCandidates.length} setups
+                </span>
+              )}
+              {missingCounts.priceHistory > 0 && (
+                <span className="rounded border border-amber-500/30 px-2 py-1 text-amber-200">
+                  Price history: {missingCounts.priceHistory} universe stocks incomplete
+                </span>
+              )}
+            </div>
+          </div>
         )}
 
         {data && (

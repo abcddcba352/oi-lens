@@ -1,6 +1,7 @@
 import { ensureDbSchema, getDb } from '@/db';
 import { env } from 'cloudflare:workers';
 import { materializeOrFetchWatchlist } from '@/lib/watchlist-materializer';
+import { buildMarketDayStatus } from '@/lib/nse-market-calendar';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -26,6 +27,7 @@ export async function GET(request: Request) {
     const asOf = latestOfficial?.latest ?? new Date(Date.parse(istDate) - 86400000).toISOString().slice(0, 10);
 
     const payload = await materializeOrFetchWatchlist(db, env.DB, mode, asOf, force);
+    payload.marketStatus = buildMarketDayStatus(new Date(), latestOfficial?.latest ?? null);
     return Response.json(payload, { headers });
   } catch (error) {
     console.error('Watchlist scan failed', error);
@@ -35,4 +37,3 @@ export async function GET(request: Request) {
     );
   }
 }
-
