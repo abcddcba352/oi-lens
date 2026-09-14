@@ -1,4 +1,5 @@
 import { instruments, marketSessions } from '@/db/schema';
+import type { getDb } from '@/db';
 import { and, gte, lte, asc, ne, sql } from 'drizzle-orm';
 import {
   buildEvidence,
@@ -18,6 +19,7 @@ import {
 import type { ChainStrike, MarketSnapshot } from './market-types';
 import {
   buildWatchOiEvidence,
+  deriveWatchWallOutcomes,
   unavailableWatchOiEvidence,
   watchOiRank,
   type WatchWallOutcomeRow,
@@ -60,15 +62,15 @@ export interface WatchlistPayload {
 
 interface D1Like {
   prepare: (query: string) => {
-    bind: (...args: any[]) => {
+    bind: (...args: unknown[]) => {
       first: <T>() => Promise<T | null>;
       all: <T>() => Promise<{ results: T[] }>;
-      run: () => Promise<any>;
+      run: () => Promise<unknown>;
     };
   };
 }
 
-const WATCHLIST_METHODOLOGY_VERSION = 'v3-oi-walls';
+const WATCHLIST_METHODOLOGY_VERSION = 'v4-derived-oi-wall-history';
 
 const groupBySymbol = <T extends { symbol: string }>(items: T[]) => {
   const groups = new Map<string, T[]>();
@@ -113,13 +115,20 @@ interface OutcomeRow {
   bounce_atr: number | null;
 }
 
+interface HistoricalStrikeRow extends SnapshotRow, ChainStrike {}
+
 const chunks = <T,>(values: T[], size = 60) => {
   const output: T[][] = [];
   for (let index = 0; index < values.length; index += size) output.push(values.slice(index, index + size));
   return output;
 };
 
-async function addOiEvidence(d1: D1Like, candidates: WatchCandidate[], asOf: string) {
+async function addOiEvidence(
+  d1: D1Like,
+  candidates: WatchCandidate[],
+  asOf: string,
+  pricesBySymbol: Map<string, WatchCandle[]>,
+) {
   if (!candidates.length) return;
   const symbols = [...new Set(candidates.map(candidate => candidate.symbol))];
   const snapshots: SnapshotRow[] = [];
@@ -228,6 +237,75 @@ async function addOiEvidence(d1: D1Like, candidates: WatchCandidate[], asOf: str
     outcomesBySymbol.set(row.instrument_id, values);
   }
 
+  // Most archive snapshots pre-date wall_predictions. For candidates without
+  // stored outcomes, derive the same completed outcomes from their saved OI
+  // chains and price sessions in small batches. This is done only while the
+  // once-per-EOD watchlist payload is materialized.
+  const missingHistory = symbols.filter(symbol => !(outcomesBySymbol.get(symbol)?.length));
+  for (const batch of chunks(missingHistory, 2)) {
+    const placeholders = batch.map(() => '?').join(',');
+    const result = await d1.prepare(`
+      SELECT s.id, s.instrument_id, s.captured_at, s.expiry, s.expiry_epoch,
+             s.spot, s.spot_change_percent, s.atr14, s.iv_percentile, s.source,
+             i.display_name, i.instrument_type, i.strike_step,
+             os.strike,
+             os.call_oi AS callOi, os.call_oi_change AS callOiChange,
+             os.call_volume AS callVolume, os.call_iv AS callIv,
+             os.put_oi AS putOi, os.put_oi_change AS putOiChange,
+             os.put_volume AS putVolume, os.put_iv AS putIv
+      FROM oi_snapshots s
+      JOIN instruments i ON i.id=s.instrument_id
+      JOIN oi_strikes os ON os.snapshot_id=s.id
+      WHERE s.instrument_id IN (${placeholders})
+        AND substr(s.captured_at,1,10)>=? AND substr(s.captured_at,1,10)<?
+      ORDER BY s.instrument_id, s.captured_at, os.strike
+    `).bind(...batch, historyStart, asOf).all<HistoricalStrikeRow>();
+
+    const historicalSnapshots = new Map<string, MarketSnapshot>();
+    for (const row of result.results) {
+      let historical = historicalSnapshots.get(row.id);
+      if (!historical) {
+        historical = {
+          symbol: row.instrument_id,
+          displayName: row.display_name,
+          instrumentType: row.instrument_type,
+          spot: row.spot,
+          spotChangePercent: row.spot_change_percent,
+          expiry: row.expiry,
+          expiryEpoch: row.expiry_epoch ?? undefined,
+          strikeStep: row.strike_step,
+          atr14: row.atr14,
+          ivPercentile: row.iv_percentile,
+          asOf: row.captured_at,
+          source: row.source as MarketSnapshot['source'],
+          chain: [],
+        };
+        historicalSnapshots.set(row.id, historical);
+      }
+      historical.chain.push({
+        strike: row.strike,
+        callOi: row.callOi,
+        callOiChange: row.callOiChange,
+        callVolume: row.callVolume,
+        callIv: row.callIv ?? undefined,
+        putOi: row.putOi,
+        putOiChange: row.putOiChange,
+        putVolume: row.putVolume,
+        putIv: row.putIv ?? undefined,
+      });
+    }
+
+    for (const symbol of batch) {
+      const snapshotsForSymbol = [...historicalSnapshots.values()].filter(snapshot => snapshot.symbol === symbol);
+      const derived = deriveWatchWallOutcomes(
+        snapshotsForSymbol,
+        pricesBySymbol.get(symbol) ?? [],
+        asOf,
+      );
+      if (derived.length) outcomesBySymbol.set(symbol, derived);
+    }
+  }
+
   for (const candidate of candidates) {
     const snapshot = snapshotBySymbol.get(candidate.symbol);
     candidate.oiEvidence = snapshot
@@ -237,7 +315,7 @@ async function addOiEvidence(d1: D1Like, candidates: WatchCandidate[], asOf: str
 }
 
 export async function computeWatchlistPayload(
-  db: any,
+  db: ReturnType<typeof getDb>,
   d1: D1Like,
   horizon: WatchHorizon,
   asOf: string,
@@ -335,7 +413,7 @@ export async function computeWatchlistPayload(
     excluded.push({ symbol, name, reason, close, asOf });
   };
 
-  const stocks = metadata.filter((m: any) => m.instrumentType === 'stock' && m.id.startsWith('NSE:'));
+  const stocks = metadata.filter(m => m.instrumentType === 'stock' && m.id.startsWith('NSE:'));
 
   for (const stock of stocks) {
     // Validate current F&O universe separately from legacy symbols
@@ -419,7 +497,7 @@ export async function computeWatchlistPayload(
 
   const allSetups = [...prioritySetups, ...developingSetups];
   try {
-    await addOiEvidence(d1, allSetups, asOf);
+    await addOiEvidence(d1, allSetups, asOf, bySymbol);
   } catch (error) {
     console.warn('OI watchlist enrichment unavailable', error);
     for (const candidate of allSetups) {
@@ -461,7 +539,7 @@ export async function computeWatchlistPayload(
 }
 
 export async function materializeOrFetchWatchlist(
-  db: any,
+  db: ReturnType<typeof getDb>,
   d1: D1Like,
   horizon: WatchHorizon,
   asOf: string,

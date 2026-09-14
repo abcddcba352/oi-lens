@@ -5,6 +5,7 @@ import type { WatchCandidate } from '../lib/position-watchlist.ts';
 import { declarePrimaryWalls } from '../lib/wall-backtest.ts';
 import {
   buildWatchOiEvidence,
+  deriveWatchWallOutcomes,
   unavailableWatchOiEvidence,
   watchOiRank,
   type WatchWallOutcomeRow,
@@ -135,4 +136,24 @@ test('stale and unavailable OI never count as confirmation', () => {
   assert.equal(unavailableWatchOiEvidence().classification, 'Price only');
   assert.ok(watchOiRank('OI confirmed') > watchOiRank('OI developing'));
   assert.ok(watchOiRank('Price only') > watchOiRank('OI conflict'));
+});
+
+test('archive snapshots derive completed outcomes once per day without future leakage', () => {
+  const archived = { ...snapshot, asOf: '2026-08-01T12:00:00.000Z' };
+  const laterSameDay = { ...archived, asOf: '2026-08-01T15:00:00.000Z' };
+  const cutoffSnapshot = { ...archived, asOf: '2026-09-11T09:00:00.000Z' };
+  const prices = Array.from({ length: 10 }, (_, index) => ({
+    date: `2026-08-${String(index + 2).padStart(2, '0')}`,
+    high: 106,
+    low: 94,
+    close: 100,
+  }));
+  const rows = deriveWatchWallOutcomes(
+    [archived, laterSameDay, cutoffSnapshot],
+    prices,
+    '2026-09-11',
+  );
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(row => row.capturedAt === laterSameDay.asOf));
+  assert.ok(rows.every(row => row.reached === true));
 });

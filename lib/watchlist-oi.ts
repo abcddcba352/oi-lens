@@ -1,6 +1,13 @@
-import type { LevelSide, MarketSnapshot } from './market-types.ts';
+import type { LevelSide, MarketSnapshot, PriceSession } from './market-types.ts';
 import type { WatchCandidate } from './position-watchlist.ts';
-import { aggregateWallStats, declarePrimaryWalls, type EvaluatedPredictionRow } from './wall-backtest.ts';
+import {
+  aggregateWallStats,
+  declarePrimaryWalls,
+  evaluateFromHistory,
+  HORIZON_SESSIONS,
+  tradingSessionsUntilExpiry,
+  type EvaluatedPredictionRow,
+} from './wall-backtest.ts';
 
 export type WatchOiClassification =
   | 'OI confirmed'
@@ -118,6 +125,47 @@ export function unavailableWatchOiEvidence(note = 'No saved option-chain snapsho
     historical: null,
     note,
   };
+}
+
+/** Derive completed outcomes from saved daily snapshots without writing more D1 rows. */
+export function deriveWatchWallOutcomes(
+  snapshots: MarketSnapshot[],
+  prices: PriceSession[],
+  cutoffDate: string,
+): WatchWallOutcomeRow[] {
+  const latestByDay = new Map<string, MarketSnapshot>();
+  for (const snapshot of snapshots) {
+    const date = snapshot.asOf.slice(0, 10);
+    if (date >= cutoffDate || !snapshot.chain.length) continue;
+    const current = latestByDay.get(date);
+    if (!current || snapshot.asOf > current.asOf) latestByDay.set(date, snapshot);
+  }
+
+  const rows: WatchWallOutcomeRow[] = [];
+  for (const snapshot of [...latestByDay.values()].sort((a, b) => a.asOf.localeCompare(b.asOf))) {
+    const declaredDate = snapshot.asOf.slice(0, 10);
+    const walls = declarePrimaryWalls(snapshot, `derived:${snapshot.symbol}:${snapshot.asOf}`);
+    const horizon = tradingSessionsUntilExpiry(snapshot.asOf, snapshot.expiryEpoch, HORIZON_SESSIONS);
+    if (horizon <= 0) continue;
+    for (const side of ['support', 'resistance'] as const) {
+      const declaration = walls[side];
+      if (!declaration) continue;
+      const result = evaluateFromHistory(prices, declaredDate, declaration.strike, side, declaration.atr14, horizon);
+      if (!result) continue;
+      rows.push({
+        side,
+        declaredDate,
+        capturedAt: snapshot.asOf,
+        reached: result.reached,
+        daysToReach: result.daysToReach,
+        held: result.held,
+        broke: result.broke,
+        bouncePoints: result.bouncePoints,
+        bounceAtr: result.bounceAtr,
+      });
+    }
+  }
+  return rows;
 }
 
 /**
