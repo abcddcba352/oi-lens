@@ -18,7 +18,8 @@
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "import:nse-oi": "python scripts/backfill_history.py --symbols ALL",
     "update:nse-oi": "python scripts/backfill_history.py --symbols ALL --days 3 --output nse_oi_update.sql && npx wrangler d1 execute site-creator-d1 --config wrangler.d1.json --remote --file nse_oi_update.sql",
-    "daily:update": "npm run update:nse-oi",
+    "daily:update": "npm run update:nse-oi && npm run forward:update",
+    "forward:update": "node --experimental-strip-types scripts/update-forward-test.mjs --write",
     "setup:task": "powershell -ExecutionPolicy Bypass -File scripts/setup_task.ps1"
   },
   "dependencies": {

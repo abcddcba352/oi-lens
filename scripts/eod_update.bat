@@ -19,5 +19,11 @@ if %ERRORLEVEL% NEQ 0 (
   exit /b %ERRORLEVEL%
 )
 
-echo [OI-LENS] EOD Update complete!
+call npm run forward:update
+if %ERRORLEVEL% NEQ 0 (
+  echo [ERROR] Forward ledger update failed. Existing records are preserved.
+  exit /b %ERRORLEVEL%
+)
+
+echo [OI-LENS] EOD and forward ledger update complete!
 endlocal

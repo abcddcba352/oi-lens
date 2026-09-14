@@ -33,7 +33,7 @@ Breakout: close above prior 20-session high plus 0.25 ATR, but no more than 1.5 
 - Corporate actions are not normalized. Future >25% discontinuities are separately excluded for review (zero in these compared usable groups); smaller actions can still distort results.
 - No portfolio allocation, capital constraints, market-date clustering, drawdown estimate, dividends or precise instrument fees. Aggregate trade averages are not an investable portfolio return.
 - Full archived chains support the OI comparison. Live retained chains can be truncated, so the OI variant is **not** activated as an equivalent live entry filter.
-- Live trend candidates are sorted descriptively by relative strength. Buying only top-ranked names is untested. No live trade/order or forward-performance ledger was added.
+- Live trend candidates are sorted descriptively by relative strength. Buying only top-ranked names is untested. No orders are placed. A separate prospective ledger was added on 15 September 2026; its recorded outcomes are not part of this historical comparison.
 - Official daily ingestion continues to refresh candidates through existing materialization. This frozen study does **not** automatically rerun or gain validation as new data arrives.
 - Six months of input history cannot validate a six-month holding strategy.
 

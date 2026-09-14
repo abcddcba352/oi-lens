@@ -1,6 +1,6 @@
 # setup_task.ps1
 # Registers a Windows Task Scheduler job to run the NSE OI daily update
-# every weekday at 4:15 PM (local time — set your PC timezone to IST).
+# every weekday at 6:45 PM (local time — set your PC timezone to IST).
 # Run once with:  npm run setup:task
 
 $TaskName   = 'OI-Lens-Daily-NSE-Update'
@@ -16,14 +16,14 @@ $Action = New-ScheduledTaskAction `
     -Argument 'run daily:update' `
     -WorkingDirectory $ProjectDir
 
-# Mon–Fri at 4:15 PM
+# Mon–Fri at 6:45 PM, after official EOD publication
 $Trigger = New-ScheduledTaskTrigger `
     -Weekly `
     -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday `
-    -At '4:15PM'
+    -At '6:45PM'
 
 $Settings = New-ScheduledTaskSettingsSet `
-    -ExecutionTimeLimit (New-TimeSpan -Minutes 15) `
+    -ExecutionTimeLimit (New-TimeSpan -Minutes 30) `
     -StartWhenAvailable `
     -RunOnlyIfNetworkAvailable
 
@@ -32,8 +32,8 @@ Register-ScheduledTask `
     -Action $Action `
     -Trigger $Trigger `
     -Settings $Settings `
-    -Description 'Downloads official NSE F&O EOD bhavcopy and imports 7-day OI update into local Cloudflare D1.' `
+    -Description 'Imports official NSE EOD data into remote Cloudflare D1 and updates the prospective research ledger.' `
     -Force | Out-Null
 
-Write-Host "Task '$TaskName' registered. Runs Monday-Friday at 4:15 PM." -ForegroundColor Green
+Write-Host "Task '$TaskName' registered. Runs Monday-Friday at 6:45 PM." -ForegroundColor Green
 Write-Host 'Verify in Task Scheduler > Task Scheduler Library.' -ForegroundColor Cyan

@@ -80,3 +80,19 @@ export const watchlistSnapshots = sqliteTable('watchlist_snapshots', {
 }, (table) => [
   index('watchlist_snapshots_horizon_asof_idx').on(table.horizon, table.asOf),
 ]);
+
+// Compact immutable declarations and append-only observed outcomes survive raw-data retention.
+export const forwardSignals = sqliteTable('forward_signals', {
+  id: text('id').primaryKey(), version: text('version').notNull(),
+  symbol: text('symbol').notNull(), signalDate: text('signal_date').notNull(),
+  recordedAt: text('recorded_at').notNull(), signalJson: text('signal_json').notNull(),
+  outcomeJson: text('outcome_json').notNull(), status: text('status').notNull(),
+  netR: real('net_r'), updatedAt: text('updated_at').notNull(),
+}, t => [uniqueIndex('forward_signals_version_symbol_date').on(t.version,t.symbol,t.signalDate),
+  index('forward_signals_version_status_date').on(t.version,t.status,t.signalDate)]);
+
+export const forwardTestState = sqliteTable('forward_test_state', {
+  version: text('version').primaryKey(), startedAt: text('started_at').notNull(),
+  rulesHash: text('rules_hash').notNull(), lastRunAt: text('last_run_at').notNull(),
+  lastEod: text('last_eod'), note: text('note').notNull(),
+});

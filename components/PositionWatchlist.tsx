@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StrategyComparison } from '@/components/StrategyComparison';
+import { ForwardTestLedger } from '@/components/ForwardTestLedger';
 import type { WatchCandidate, WatchHorizon } from '@/lib/position-watchlist';
 import type { WatchlistPayload, DataIncompleteCandidate, ExcludedCandidate } from '@/lib/watchlist-materializer';
 
@@ -208,6 +209,7 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
       </div>
 
       {horizon === 'short' && <StrategyComparison />}
+      {horizon === 'short' && <ForwardTestLedger />}
 
       {/* Group Navigation Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-border pb-2" role="tablist">
@@ -497,7 +499,7 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
       {c.strategy && <p className="mt-3 text-xs text-amber-200">
         Matches: {c.strategy.matchedRules.join(', ')}. Observation only. The test enters next session at open
         only if between the frozen stop and target, then exits at stop, target or session 20.
-        This is not an active trade ledger; repeated daily candidates are not independent signals.
+        Check the forward ledger for recorded entries; repeated daily candidates are not independent signals.
       </p>}
       <dl className="mt-4 grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
         <div>
