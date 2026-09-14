@@ -70,7 +70,7 @@ interface D1Like {
   };
 }
 
-const WATCHLIST_METHODOLOGY_VERSION = 'v4-derived-oi-wall-history';
+const WATCHLIST_METHODOLOGY_VERSION = 'v5-weekly-oi-wall-history';
 
 const groupBySymbol = <T extends { symbol: string }>(items: T[]) => {
   const groups = new Map<string, T[]>();
@@ -237,14 +237,20 @@ async function addOiEvidence(
     outcomesBySymbol.set(row.instrument_id, values);
   }
 
-  // Most archive snapshots pre-date wall_predictions. For candidates without
-  // stored outcomes, derive the same completed outcomes from their saved OI
-  // chains and price sessions in small batches. This is done only while the
-  // once-per-EOD watchlist payload is materialized.
-  const missingHistory = symbols.filter(symbol => !(outcomesBySymbol.get(symbol)?.length));
-  for (const batch of chunks(missingHistory, 2)) {
+  // Most archive snapshots pre-date wall_predictions. Derive completed outcomes
+  // from one saved OI declaration per week so overlapping 10-session windows
+  // are not treated as independent tests. This runs only during once-per-EOD
+  // watchlist materialization; stored outcomes remain a fallback.
+  for (const batch of chunks(symbols, 4)) {
     const placeholders = batch.map(() => '?').join(',');
     const result = await d1.prepare(`
+      WITH weekly AS (
+        SELECT instrument_id, strftime('%Y-%W', captured_at) AS week_key, MAX(captured_at) AS captured_at
+        FROM oi_snapshots
+        WHERE instrument_id IN (${placeholders})
+          AND substr(captured_at,1,10)>=? AND substr(captured_at,1,10)<?
+        GROUP BY instrument_id, week_key
+      )
       SELECT s.id, s.instrument_id, s.captured_at, s.expiry, s.expiry_epoch,
              s.spot, s.spot_change_percent, s.atr14, s.iv_percentile, s.source,
              i.display_name, i.instrument_type, i.strike_step,
@@ -253,11 +259,10 @@ async function addOiEvidence(
              os.call_volume AS callVolume, os.call_iv AS callIv,
              os.put_oi AS putOi, os.put_oi_change AS putOiChange,
              os.put_volume AS putVolume, os.put_iv AS putIv
-      FROM oi_snapshots s
+      FROM weekly w
+      JOIN oi_snapshots s ON s.instrument_id=w.instrument_id AND s.captured_at=w.captured_at
       JOIN instruments i ON i.id=s.instrument_id
       JOIN oi_strikes os ON os.snapshot_id=s.id
-      WHERE s.instrument_id IN (${placeholders})
-        AND substr(s.captured_at,1,10)>=? AND substr(s.captured_at,1,10)<?
       ORDER BY s.instrument_id, s.captured_at, os.strike
     `).bind(...batch, historyStart, asOf).all<HistoricalStrikeRow>();
 

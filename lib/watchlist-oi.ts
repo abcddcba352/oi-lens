@@ -236,7 +236,7 @@ export function buildWatchOiEvidence(
     note: stale
       ? 'The saved OI snapshot is more than seven calendar days older than the price cutoff, so it is displayed but not used as confirmation.'
       : historical
-        ? 'Historical rates use completed 10-session wall outcomes only; multiple snapshots on one day count once.'
+        ? 'Historical rates use completed 10-session wall outcomes from independent weekly archive samples.'
         : 'Current walls are available, but no completed historical wall outcomes are stored yet.',
   };
 }

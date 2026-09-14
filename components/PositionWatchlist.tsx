@@ -330,7 +330,7 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
               Participation and sector evidence are evaluated separately from the 0–100 technical score. Missing delivery or futures data remains <strong>Unavailable</strong> and is never treated as zero or bearish confirmation.
             </p>
             <p>
-              OI walls reuse the Level Map selector. Exchange-reported OI change cannot identify buyer versus writer intent by itself. Historical wall counts use completed 10-session outcomes, exclude the current cutoff date, and count at most one wall per side per day.
+              OI walls reuse the Level Map selector. Exchange-reported OI change cannot identify buyer versus writer intent by itself. Historical wall counts use completed 10-session outcomes, exclude the current cutoff date, and sample one saved declaration per week to avoid overlapping tests.
             </p>
             <p className="text-amber-200">{data.validation}</p>
           </div>
