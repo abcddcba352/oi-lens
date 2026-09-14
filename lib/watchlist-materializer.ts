@@ -19,6 +19,7 @@ import {
 import type { ChainStrike, MarketSnapshot } from './market-types';
 import {
   buildWatchOiEvidence,
+  applyWatchOiPriorityGuard,
   deriveWatchWallOutcomes,
   unavailableWatchOiEvidence,
   watchOiRank,
@@ -72,7 +73,7 @@ interface D1Like {
   };
 }
 
-const WATCHLIST_METHODOLOGY_VERSION = 'v5-weekly-oi-wall-history';
+const WATCHLIST_METHODOLOGY_VERSION = 'v6-oi-breakout-confirmation';
 
 const groupBySymbol = <T extends { symbol: string }>(items: T[]) => {
   const groups = new Map<string, T[]>();
@@ -316,7 +317,7 @@ async function addOiEvidence(
   for (const candidate of candidates) {
     const snapshot = snapshotBySymbol.get(candidate.symbol);
     candidate.oiEvidence = snapshot
-      ? buildWatchOiEvidence(candidate, snapshot, outcomesBySymbol.get(candidate.symbol) ?? [], asOf)
+      ? buildWatchOiEvidence(candidate, snapshot, outcomesBySymbol.get(candidate.symbol) ?? [], asOf, pricesBySymbol.get(candidate.symbol) ?? [])
       : unavailableWatchOiEvidence();
   }
 }
@@ -511,6 +512,10 @@ export async function computeWatchlistPayload(
       candidate.oiEvidence = unavailableWatchOiEvidence('OI evidence could not be read; the price setup remains available.');
     }
   }
+
+  for (const candidate of allSetups) applyWatchOiPriorityGuard(candidate);
+  prioritySetups.splice(0, prioritySetups.length, ...allSetups.filter(candidate => candidate.group === 'priority'));
+  developingSetups.splice(0, developingSetups.length, ...allSetups.filter(candidate => candidate.group === 'developing'));
 
   const compare = (a: WatchCandidate, b: WatchCandidate) =>
     watchOiRank(b.oiEvidence?.classification ?? 'Price only') -

@@ -5,6 +5,7 @@ import type { WatchCandidate } from '../lib/position-watchlist.ts';
 import { declarePrimaryWalls } from '../lib/wall-backtest.ts';
 import {
   buildWatchOiEvidence,
+  applyWatchOiPriorityGuard,
   deriveWatchWallOutcomes,
   unavailableWatchOiEvidence,
   watchOiRank,
@@ -58,6 +59,52 @@ const snapshot: MarketSnapshot = {
     { strike: 110, callOi: 100, callOiChange: -5, callVolume: 20, putOi: 10, putOiChange: 0, putVolume: 10 },
   ],
 };
+
+function breakoutFixture(closes: number[], overrides: Partial<MarketSnapshot> = {}) {
+  const setup: WatchCandidate = { ...candidate, close: closes.at(-1)!, atr: 10, group: 'priority' };
+  const chain: MarketSnapshot = { ...snapshot, spot: setup.close, chain: [
+    ...snapshot.chain,
+    { strike: 100, callOi: 1500, callOiChange: 100, callVolume: 500, putOi: 100, putOiChange: 0, putVolume: 10 },
+  ], ...overrides };
+  const prices = closes.map((close, index) => ({
+    date: `2026-09-${String(12 - closes.length + index).padStart(2, '0')}`,
+    open: close, high: close + 1, low: close - 1, close, source: 'nse-bhavcopy',
+  }));
+  setup.oiEvidence = buildWatchOiEvidence(setup, chain, [], setup.asOf, prices);
+  applyWatchOiPriorityGuard(setup);
+  return setup;
+}
+
+test('small crossing retains the call zone and demotes priority despite a higher overhead wall', () => {
+  const setup = breakoutFixture([99, 101]);
+  assert.equal(setup.oiEvidence?.breakoutCheck?.strike, 100);
+  assert.equal(setup.oiEvidence?.resistance?.strike, 105);
+  assert.equal(setup.oiEvidence?.breakoutCheck?.status, 'Needs confirmation');
+  assert.equal(setup.group, 'developing');
+});
+
+test('one clear close does not confirm but two closes beyond tolerance do', () => {
+  assert.equal(breakoutFixture([99, 104]).group, 'developing');
+  // Isolate the crossed zone: an additional nearby overhead wall should still block priority.
+  const isolated = { chain: [{ ...snapshot.chain[2], strike: 100 }] };
+  assert.equal(breakoutFixture([99, 104], isolated).group, 'developing');
+  assert.equal(breakoutFixture([103, 104], isolated).oiEvidence?.breakoutCheck?.status, 'Held above zone');
+});
+
+test('close back below the zone after clearing it flags failed breakout', () => {
+  const setup = breakoutFixture([104, 97]);
+  assert.equal(setup.oiEvidence?.breakoutCheck?.status, 'Failed breakout');
+  assert.equal(setup.group, 'developing');
+});
+
+test('stale OI cannot confirm or veto a current breakout', () => {
+  assert.equal(breakoutFixture([99, 101], { asOf: '2026-08-01T12:00:00Z' }).oiEvidence?.breakoutCheck, undefined);
+});
+
+test('insignificant call OI is not treated as an unresolved wall', () => {
+  const setup = breakoutFixture([99, 101], { chain: snapshot.chain });
+  assert.equal(setup.oiEvidence?.breakoutCheck, undefined);
+});
 
 const outcome = (
   side: 'support' | 'resistance',

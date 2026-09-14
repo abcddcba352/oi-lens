@@ -532,6 +532,13 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
         </div>
       </dl>
 
+      {c.oiEvidence?.breakoutCheck && (
+        <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-200">
+          <p className="font-semibold">Call OI zone {price(c.oiEvidence.breakoutCheck.strike)} · {c.oiEvidence.breakoutCheck.status}</p>
+          <p className="mt-1">{c.oiEvidence.breakoutCheck.detail}</p>
+          <p className="mt-1 text-muted-foreground">Current OI identifies the zone; earlier price tests do not prove OI was present then.</p>
+        </div>
+      )}
       {c.oiEvidence && (
         <div className="mt-4 rounded-lg border border-border p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">

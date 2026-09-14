@@ -6,6 +6,8 @@ export type WatchHorizon = 'short' | 'positional';
 export type WatchlistGroup = 'priority' | 'developing' | 'data_incomplete' | 'excluded';
 
 export type WatchlistStage =
+  | 'OI breakout needs confirmation'
+  | 'Failed OI breakout'
   | 'Approaching resistance'
   | 'Breakout with participation'
   | 'Successful breakout retest'
