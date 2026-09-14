@@ -26,6 +26,7 @@ import {
   type WatchWallOutcomeRow,
 } from './watchlist-oi';
 import type { MarketDayStatus } from './nse-market-calendar';
+import { evaluateResearchWatchlist } from './research-watchlist';
 
 export interface DataIncompleteCandidate {
   symbol: string;
@@ -73,7 +74,7 @@ interface D1Like {
   };
 }
 
-const WATCHLIST_METHODOLOGY_VERSION = 'v6-oi-breakout-confirmation';
+const WATCHLIST_METHODOLOGY_VERSION = 'v7-research-comparison';
 
 const groupBySymbol = <T extends { symbol: string }>(items: T[]) => {
   const groups = new Map<string, T[]>();
@@ -469,7 +470,9 @@ export async function computeWatchlistPayload(
       benchmark,
     );
 
-    const result = evaluateWatchlist(
+    const result = horizon === 'short' ? evaluateResearchWatchlist(
+      stock.id, stock.displayName, candleHistory, benchmark, asOf, evidence,
+    ) : evaluateWatchlist(
       stock.id,
       stock.displayName,
       candleHistory,
@@ -513,11 +516,16 @@ export async function computeWatchlistPayload(
     }
   }
 
-  for (const candidate of allSetups) applyWatchOiPriorityGuard(candidate);
+  for (const candidate of allSetups) {
+    // The compared strategy did not use this extra filter; OI stays visible as context.
+    if (!candidate.strategy) applyWatchOiPriorityGuard(candidate);
+  }
   prioritySetups.splice(0, prioritySetups.length, ...allSetups.filter(candidate => candidate.group === 'priority'));
   developingSetups.splice(0, developingSetups.length, ...allSetups.filter(candidate => candidate.group === 'developing'));
 
-  const compare = (a: WatchCandidate, b: WatchCandidate) =>
+  const compare = (a: WatchCandidate, b: WatchCandidate) => horizon === 'short'
+    ? (b.relativeStrength ?? -Infinity) - (a.relativeStrength ?? -Infinity) || a.symbol.localeCompare(b.symbol)
+    :
     watchOiRank(b.oiEvidence?.classification ?? 'Price only') -
       watchOiRank(a.oiEvidence?.classification ?? 'Price only') ||
     (b.oiEvidence?.confirmations.length ?? 0) - (a.oiEvidence?.confirmations.length ?? 0) ||
@@ -545,7 +553,7 @@ export async function computeWatchlistPayload(
     validation:
       horizon === 'positional'
         ? 'Positional technical research rules. Scores are not win probabilities. Stored history covers up to 183 calendar days and does not validate a 6-month holding strategy.'
-        : 'Short-term technical research rules. OI wall evidence is a separate confirmation layer and is not a win probability.',
+        : 'Research only: no dependable winner in the 219-stock comparison through 2026-09-11. Trend won the earlier period but failed the later test. No short-term priority recommendations. OI is context, not a tested extra filter. Ranking by relative strength is descriptive, not a tested portfolio.',
     exclusions,
   };
 }
@@ -612,7 +620,7 @@ export async function materializeOrFetchWatchlist(
     return payload;
   } catch (err) {
     // 3. Stale snapshot fallback on generation failure
-    if (existing) {
+    if (existing && existing.methodology_version === WATCHLIST_METHODOLOGY_VERSION) {
       try {
         const stale = JSON.parse(existing.payload_json) as WatchlistPayload;
         stale.staleFallback = true;

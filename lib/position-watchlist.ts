@@ -93,6 +93,12 @@ export interface WatchCandidate {
   researchLabel?: string;
   fundamentalsStatus?: 'Unassessed';
   oiEvidence?: WatchOiEvidence;
+  strategy?: {
+    id: string;
+    status: 'Research only';
+    projectedTarget: number;
+    matchedRules: string[];
+  };
 }
 
 export interface WatchResult {

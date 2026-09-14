@@ -1,0 +1,146 @@
+{
+  "asOf": "2026-09-11",
+  "stockCount": 219,
+  "selectionRule": "Highest selection-period mean net R among strategies with >=30 trades and >=10 stocks; tie follows simpler strategy order. Fallback trend research if none qualifies.",
+  "selectionCutoff": "2026-08-01",
+  "selectedId": "trend",
+  "passesStudyGate": false,
+  "liveLabel": "Research only — no dependable winner",
+  "limitations": [
+    "Six-month exploratory sample already examined in earlier research; not a pristine holdout.",
+    "Later period is short. Confidence interval resamples stocks, not market dates.",
+    "No portfolio capital model; 0.2% total friction is an assumption.",
+    "Corporate actions are not normalized; >25% discontinuities require exclusion/review.",
+    "OI variant uses full chains and cannot be silently reproduced from truncated live chains."
+  ],
+  "summaries": [
+    {
+      "id": "trend",
+      "name": "Trend baseline",
+      "selection": {
+        "count": 104,
+        "stocks": 104,
+        "actionReviewExcluded": 0,
+        "target": 27,
+        "stop": 32,
+        "timeout": 45,
+        "ambiguous": 0,
+        "meanNetR": 0.1926248679162771,
+        "medianNetR": 0.13639236780675773,
+        "positivePercent": 51.92307692307692,
+        "clusterCi95": [-0.023965568720245415, 0.3960945279153105]
+      },
+      "later": {
+        "count": 54,
+        "stocks": 54,
+        "actionReviewExcluded": 0,
+        "target": 5,
+        "stop": 27,
+        "timeout": 22,
+        "ambiguous": 0,
+        "meanNetR": -0.28434395353959635,
+        "medianNetR": -0.8752539093986791,
+        "positivePercent": 31.48148148148148,
+        "clusterCi95": [-0.5568819749221052, -0.005304897499904416]
+      },
+      "purged": 106,
+      "pending": 57
+    },
+    {
+      "id": "breakout",
+      "name": "Price breakout",
+      "selection": {
+        "count": 47,
+        "stocks": 47,
+        "actionReviewExcluded": 0,
+        "target": 10,
+        "stop": 19,
+        "timeout": 18,
+        "ambiguous": 0,
+        "meanNetR": 0.10096260822650847,
+        "medianNetR": -0.37884310618066563,
+        "positivePercent": 48.93617021276596,
+        "clusterCi95": [-0.2261015434342923, 0.43475214096498505]
+      },
+      "later": {
+        "count": 27,
+        "stocks": 27,
+        "actionReviewExcluded": 0,
+        "target": 2,
+        "stop": 11,
+        "timeout": 14,
+        "ambiguous": 0,
+        "meanNetR": -0.23246949723796823,
+        "medianNetR": -0.3161193447737892,
+        "positivePercent": 25.925925925925927,
+        "clusterCi95": [-0.5601253585793432, 0.12151406216289742]
+      },
+      "purged": 42,
+      "pending": 26
+    },
+    {
+      "id": "pullback",
+      "name": "Pullback and recovery",
+      "selection": {
+        "count": 53,
+        "stocks": 53,
+        "actionReviewExcluded": 0,
+        "target": 13,
+        "stop": 20,
+        "timeout": 20,
+        "ambiguous": 0,
+        "meanNetR": 0.12489547887121177,
+        "medianNetR": -0.02072168568919988,
+        "positivePercent": 49.056603773584904,
+        "clusterCi95": [-0.15111161085717045, 0.43791050857486646]
+      },
+      "later": {
+        "count": 22,
+        "stocks": 22,
+        "actionReviewExcluded": 0,
+        "target": 1,
+        "stop": 10,
+        "timeout": 11,
+        "ambiguous": 0,
+        "meanNetR": -0.3059532508618424,
+        "medianNetR": -0.37652112676056393,
+        "positivePercent": 36.36363636363637,
+        "clusterCi95": [-0.6403129516202072, 0.04318224464541764]
+      },
+      "purged": 69,
+      "pending": 56
+    },
+    {
+      "id": "pullback_oi",
+      "name": "Pullback with OI room",
+      "selection": {
+        "count": 4,
+        "stocks": 4,
+        "actionReviewExcluded": 0,
+        "target": 1,
+        "stop": 1,
+        "timeout": 2,
+        "ambiguous": 0,
+        "meanNetR": 0.12994922057081545,
+        "medianNetR": 0.41295248041775434,
+        "positivePercent": 50,
+        "clusterCi95": [-0.8291105258063134, 1.1671363235979402]
+      },
+      "later": {
+        "count": 3,
+        "stocks": 3,
+        "actionReviewExcluded": 0,
+        "target": 0,
+        "stop": 0,
+        "timeout": 3,
+        "ambiguous": 0,
+        "meanNetR": 0.46886890486215355,
+        "medianNetR": 0.6562488680465722,
+        "positivePercent": 100,
+        "clusterCi95": [0.033602090332212745, 0.7167557562076757]
+      },
+      "purged": 9,
+      "pending": 5
+    }
+  ]
+}

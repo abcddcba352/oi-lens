@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { StrategyComparison } from '@/components/StrategyComparison';
 import type { WatchCandidate, WatchHorizon } from '@/lib/position-watchlist';
 import type { WatchlistPayload, DataIncompleteCandidate, ExcludedCandidate } from '@/lib/watchlist-materializer';
 
@@ -11,7 +12,7 @@ const price = (n: number) => `₹${n.toLocaleString('en-IN', { maximumFractionDi
 
 export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol: string) => void }) {
   const [horizon, setHorizon] = useState<WatchHorizon>('short');
-  const [activeTab, setActiveTab] = useState<ActiveTab>('priority');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('developing');
   const [data, setData] = useState<WatchlistPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -129,7 +130,8 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
           </div>
         ) : (
           <p className="mt-3 text-sm text-amber-200">
-            Short-term technical research watchlist. Breakouts require confirmed volume/OI participation and hold/retest confirmation. Scores are explainable ranking factors, not win probabilities.
+            Research only: no dependable strategy winner. Current trend matches are observations, not buy signals.
+            OI walls remain useful context, but high call OI does not guarantee that price will reach that strike.
           </p>
         )}
 
@@ -205,6 +207,8 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
         )}
       </div>
 
+      {horizon === 'short' && <StrategyComparison />}
+
       {/* Group Navigation Tabs */}
       <div className="flex flex-wrap gap-2 border-b border-border pb-2" role="tablist">
         <button
@@ -229,7 +233,7 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
               : 'bg-muted/50 text-muted-foreground hover:bg-muted'
           }`}
         >
-          Developing Setups ({data?.developingSetups?.length ?? 0})
+          {horizon === 'short' ? 'Research candidates' : 'Developing Setups'} ({data?.developingSetups?.length ?? 0})
         </button>
         <button
           role="tab"
@@ -276,7 +280,9 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
         <div className="space-y-4">
           {priorityMatches.length === 0 ? (
             <p className="rounded-xl border border-border p-5 text-sm text-muted-foreground">
-              No priority setups currently meeting all trend, participation and risk-distance criteria for {horizon === 'short' ? 'short-term' : 'positional'}. Check the Developing Setups tab for emerging watch candidates.
+              {horizon === 'short'
+                ? 'Priority recommendations are disabled: the selected strategy failed the later historical test. View Research candidates for observation only.'
+                : 'No positional priority setups meet the rules. Check Developing Setups for research candidates.'}
             </p>
           ) : (
             priorityMatches.map(c => renderCandidateCard(c, onSelectSymbol))
@@ -379,13 +385,18 @@ export function PositionWatchlist({ onSelectSymbol }: { onSelectSymbol: (symbol:
           <summary className="cursor-pointer font-medium">Screening Methodology & Coverage Guidelines</summary>
           <div className="mt-3 space-y-2 text-xs text-muted-foreground">
             <p>
-              Short-term list requires 60 sessions and a rising 20-session moving average. Positional list requires 120 sessions and a rising 50-session moving average. Resistance is defined over the prior 20/40 sessions, excluding evaluated candles.
+              Short-term research requires 60 sessions, close above rising MA20, MA20 above MA50,
+              positive 20-session return versus NIFTY and prior median cash volume of at least 25,000 shares.
+              It uses the same signal function as the comparison. Sorting by relative strength is descriptive;
+              selecting only the top-ranked stocks has not been tested. Positional rules remain separate.
             </p>
             <p>
               Breakout retests are evaluated chronologically: a prior breakout must have held above invalidation, tested resistance within 0.5 ATR, and closed above resistance without future lookahead.
             </p>
             <p>
-              Reward/risk uses the greater of latest close and breakout trigger as indicative entry. When overhead resistance has no older confirmed pivot high, targets and reward/risk remain <strong>Target review required</strong> rather than fabricating arbitrary upside.
+              Short-term research stops are close minus 2 ATR, with projected targets at close plus 4 ATR.
+              These are test assumptions, not historical resistance or a promised 2:1 return; next-open gaps change risk/reward.
+              Positional reward/risk uses the greater of close and breakout trigger; unmapped historical targets require review.
             </p>
             <p>
               Participation and sector evidence are evaluated separately from the 0–100 technical score. Missing delivery or futures data remains <strong>Unavailable</strong> and is never treated as zero or bearish confirmation.
@@ -417,7 +428,7 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
                   : 'border-blue-500/40 bg-blue-500/20 text-blue-300'
               }`}
             >
-              {c.group === 'priority' ? 'Priority Setup' : 'Developing Setup'}
+              {c.strategy ? 'Research candidate' : c.group === 'priority' ? 'Priority Setup' : 'Developing Setup'}
             </span>
             <span
               className={`rounded border px-2 py-0.5 text-xs font-semibold ${
@@ -465,9 +476,9 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
 
         <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-2">
-            <span className="rounded-md bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
+            {!c.strategy && <span className="rounded-md bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
               {c.score}/100 Technical Score
-            </span>
+            </span>}
             {c.evidenceCoverage && (
               <span
                 className={`rounded-md px-2.5 py-1 text-xs font-medium ${
@@ -483,23 +494,28 @@ function renderCandidateCard(c: WatchCandidate, onSelectSymbol: (symbol: string)
         </div>
       </div>
 
+      {c.strategy && <p className="mt-3 text-xs text-amber-200">
+        Matches: {c.strategy.matchedRules.join(', ')}. Observation only. The test enters next session at open
+        only if between the frozen stop and target, then exits at stop, target or session 20.
+        This is not an active trade ledger; repeated daily candidates are not independent signals.
+      </p>}
       <dl className="mt-4 grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
         <div>
           <dt className="text-xs text-muted-foreground">Prior price resistance</dt>
           <dd className="font-medium">{price(c.resistance)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">Breakout trigger</dt>
+          <dt className="text-xs text-muted-foreground">{c.strategy ? 'Signal close (not fill price)' : 'Breakout trigger'}</dt>
           <dd className="font-medium">{price(c.entryTrigger)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">Indicative invalidation</dt>
+          <dt className="text-xs text-muted-foreground">{c.strategy ? 'Research stop (close − 2 ATR)' : 'Indicative invalidation'}</dt>
           <dd className="font-medium">{price(c.invalidation)}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">Next historical resistance</dt>
+          <dt className="text-xs text-muted-foreground">{c.strategy ? 'Projected target (close + 4 ATR)' : 'Next historical resistance'}</dt>
           <dd className="font-medium">
-            {c.nextResistance === null ? 'Unmapped (ATH)' : price(c.nextResistance)}
+            {c.strategy ? price(c.strategy.projectedTarget) : c.nextResistance === null ? 'Unmapped' : price(c.nextResistance)}
           </dd>
         </div>
         <div>
