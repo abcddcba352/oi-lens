@@ -129,6 +129,8 @@ export interface TimeframeAnalysis {
 }
 
 export interface MarketAnalysis {
+  /** Actual completed price candles used; never model validation observations. */
+  priceHistoryCoverage?: { sessions: number; firstSession: string | null; latestSession: string | null };
   snapshot: MarketSnapshot;
   /**
    * The two views intentionally use different evidence and time horizons.

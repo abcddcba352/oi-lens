@@ -1,5 +1,5 @@
 import { analyzeSnapshotWithPriceHistory } from '@/lib/oi-model';
-import { getMarketProvider, DemoProvider } from '@/lib/providers';
+import { getMarketProvider } from '@/lib/providers';
 import { readFyersAuthorization } from '@/lib/fyers-auth';
 import {
   evaluatePendingWalls,
@@ -173,7 +173,7 @@ export async function GET(request: Request) {
       ? await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf)
       : null;
 
-    if (!cached) {
+    if (!cached && provider.id === 'fyers') {
       try {
         cached = await loadOrRefreshPriceHistory(provider, snapshot);
       } catch {
@@ -185,14 +185,8 @@ export async function GET(request: Request) {
       cached = await loadCachedPriceHistory(snapshot.symbol, snapshot.asOf);
     }
 
-    // Fallback for demo-supported indices if D1 does not have cached sessions yet
-    if (!cached && (snapshot.instrumentType === 'index' || symbol.endsWith('-INDEX'))) {
-      const demoProvider = new DemoProvider();
-      cached = await loadOrRefreshPriceHistory(demoProvider, snapshot);
-    }
-
     if (!cached) {
-      throw new Error(`Only 0 cached daily sessions available for ${symbol}; at least ${MIN_SESSIONS_FOR_BASIC_ANALYSIS} are needed for basic analysis.`);
+      throw new Error(`Insufficient completed daily history for ${symbol}; at least ${MIN_SESSIONS_FOR_BASIC_ANALYSIS} sessions are needed. Check the daily NSE import or connect FYERS to fetch history.`);
     }
 
     const isFullHistory = cached.history.length >= MIN_SESSIONS_FOR_FULL_HISTORY;

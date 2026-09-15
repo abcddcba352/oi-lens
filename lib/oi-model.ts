@@ -833,6 +833,7 @@ export function analyzeSnapshotWithPriceHistory(
 
   return {
     snapshot: liveSnapshot,
+    priceHistoryCoverage: { sessions: history.length, firstSession: history[0]?.date ?? null, latestSession: history.at(-1)?.date ?? null },
     intraday,
     positional,
     // Preserve the previous surface as the more evidence-rich positional map.

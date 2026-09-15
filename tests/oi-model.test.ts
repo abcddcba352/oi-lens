@@ -4,6 +4,18 @@ import { getDemoObservations, getDemoPersistence, getDemoPriceHistory, getDemoSn
 import { analyzeSnapshot, analyzeSnapshotWithPriceHistory, atrFromPriceHistory, calibrateModel, filterSixMonthObservations, labelLevelOutcome } from '../lib/oi-model.ts';
 import type { OiHistoryContext } from '../lib/market-types.ts';
 
+test('price coverage counts completed candles, independently of OI validation observations', () => {
+  const snapshot = getDemoSnapshot();
+  const prices = getDemoPriceHistory(snapshot.symbol, snapshot.asOf);
+  const observations = getDemoObservations(snapshot.symbol, snapshot.asOf);
+  const analysis = analyzeSnapshotWithPriceHistory(snapshot, prices, { intraday: [], positional: [] }, observations);
+  const completed = prices.filter(p => p.date < snapshot.asOf.slice(0, 10)).slice(-140);
+  assert.equal(analysis.priceHistoryCoverage?.sessions, completed.length);
+  assert.equal(analysis.priceHistoryCoverage?.firstSession, completed[0].date);
+  assert.equal(analysis.priceHistoryCoverage?.latestSession, completed.at(-1)?.date);
+  assert.notEqual(analysis.priceHistoryCoverage?.sessions, analysis.diagnostics.validationSamples);
+});
+
 test('unknown stock symbols never fall back to the NIFTY demo snapshot', () => {
   assert.throws(
     () => getDemoSnapshot('NSE:TCS-EQ'),
@@ -215,4 +227,3 @@ test('support levels are ordered descending (S1 > S2 > S3) and resistance levels
     assert.ok(resistances.some((l) => l.isPrimary));
   }
 });
-

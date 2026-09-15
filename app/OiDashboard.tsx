@@ -673,7 +673,7 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
         ) : (
           <>
             <section className="grid gap-3 rounded-2xl border border-border/70 bg-card/80 p-4 shadow-2xl shadow-black/10 lg:grid-cols-[1fr_minmax(320px,auto)_auto] lg:items-end sm:p-5">
-          <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Two-horizon level map</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Intraday OI and positional support/resistance</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">The intraday map reads live positioning strength. The positional map combines current OI with six months of daily price-zone behaviour. They are kept separate so daily history is never presented as intraday proof.</p></div>
+          <div><div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.14em] text-primary"><Activity className="size-4" />Two-horizon level map</div><h1 className="font-heading mt-2 text-2xl font-bold tracking-tight sm:text-3xl">Intraday OI and positional support/resistance</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">The intraday map reads live positioning strength. The positional map combines current OI with available completed daily price-zone history. They are kept separate so daily history is never presented as intraday proof.</p></div>
           <SymbolSearch
             key={symbol}
             value={symbol}
@@ -695,18 +695,18 @@ export function OiDashboard({ initial }: { initial: MarketAnalysis }) {
                 <div className="flex items-center gap-2">
                   <Zap className="size-4 shrink-0 text-amber-400" />
                   <span>
-                    <strong className="text-emerald-300">Method 2 Footprint:</strong> Resistance at <strong className="font-mono text-foreground">₹{money(primaryResistance.strike)}</strong> is accumulating fresh Call OI ({signedCompact(primaryResistance.oiChange)}) with volume confirmation.
+                    <strong className="text-emerald-300">Method 2 Footprint:</strong> Resistance at <strong className="font-mono text-foreground">₹{money(primaryResistance.strike)}</strong> has increased Call OI ({signedCompact(primaryResistance.oiChange)}). OI alone does not confirm selling or a price rejection.
                   </span>
                 </div>
                 <Badge variant="outline" className="border-emerald-400/30 bg-emerald-400/10 text-emerald-300 text-[10px] font-mono">
-                  Strong Ceiling
+                  Call OI candidate
                 </Badge>
               </div>
             )}
           </CardContent></Card>
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-1">
-            <Metric icon={<History />} label="History window" value="6 months" detail={`${diagnostics.lookbackStart} to ${diagnostics.lookbackEnd}`} />
-            <Metric icon={<ShieldCheck />} label="Historical input" value={`${diagnostics.validationSamples} sessions`} detail={dataStatus ? `${historyStatus(dataStatus.historySource)} · latest ${dataStatus.latestSession ?? '—'}` : 'Connect FYERS to initialize the history cache'} />
+            <Metric icon={<History />} label="Price history coverage" value={analysis.priceHistoryCoverage ? `${analysis.priceHistoryCoverage.sessions} completed sessions` : 'Unavailable'} detail={analysis.priceHistoryCoverage?.firstSession ? `${analysis.priceHistoryCoverage.firstSession} to ${analysis.priceHistoryCoverage.latestSession} · requested lookback: up to 6 months · ${dataStatus ? historyStatus(dataStatus.historySource) : 'Demo history'}` : 'No completed price candles available'} />
+            <Metric icon={<ShieldCheck />} label="OI model validation" value={diagnostics.mode === 'calibrated' ? `${diagnostics.validationSamples} observations` : 'Not calibrated'} detail="Held-out OI-wall observations, not a count of daily price sessions." />
             <Metric icon={<Activity />} label="Price-zone evidence" value={`${positional.historicalTests} tests`} detail={positional.historicalHoldRate === null ? 'No completed daily-zone tests yet' : `Observed defence rate ${(positional.historicalHoldRate * 100).toFixed(0)}%`} />
             <Metric icon={<Activity />} label="OI archive" value={dataStatus?.oiSnapshotStored ? 'Recording' : dataStatus?.oiSnapshotWarning ? 'Retry pending' : 'Waiting for FYERS'} detail={dataStatus?.oiSnapshotWarning ?? (dataStatus ? `One snapshot per ${dataStatus.oiSnapshotIntervalMinutes}-minute window` : 'Builds historical OI evidence over time')} />
             <Metric icon={<Activity />} label="Current regime" value={`PCR ${analysis.putCallRatio.toFixed(2)}`} detail={`ATR ${snapshot.atr14.toFixed(0)} · Max pain ${analysis.maxPain ? money(analysis.maxPain) : '—'}`} />
@@ -924,6 +924,7 @@ function TimeframePanel({ frame }: { frame: TimeframeAnalysis }) {
       </div>
       <p className="mt-3 text-xs leading-5 text-muted-foreground">{frame.note}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        {intraday && frame.oiHistorySnapshots < 2 && <p className="text-sm text-amber-300 sm:col-span-2">Insufficient intraday OI history: {frame.oiHistorySnapshots} saved snapshot(s). Sustained buildup or defence is not confirmed. Refreshing records observations; it does not prove the level will hold.</p>}
         <SignalCard level={frame.primarySupport} side="support" horizon={intraday ? 'Intraday' : 'Positional'} />
         <SignalCard level={frame.primaryResistance} side="resistance" horizon={intraday ? 'Intraday' : 'Positional'} />
       </div>
@@ -944,7 +945,7 @@ function SignalCard({ level, side, horizon }: { level: LevelSignal | null; side:
   const support = side === 'support';
   if (!level) return <article className="rounded-xl border border-border p-4 text-sm text-muted-foreground">No {side} candidate in the loaded strikes.</article>;
   const label = `${horizon} strength`;
-  return <article className={`rounded-xl border p-4 ${support ? 'border-emerald-400/20 bg-emerald-400/[0.06]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><div className="flex items-center justify-between"><span className={`text-xs font-black uppercase tracking-[0.14em] ${support ? 'text-emerald-300' : 'text-rose-300'}`}>Primary {side}</span>{support ? <ArrowDownRight className="size-4 text-emerald-300" /> : <ArrowUpRight className="size-4 text-rose-300" />}</div><p className="mt-3 font-mono text-3xl font-black">{money(level.strike)}</p><p className="mt-2 text-xs font-bold">{level.distancePoints.toFixed(1)} points · {level.distancePercent.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">{label} {level.score}%</p></article>;
+  return <article className={`rounded-xl border p-4 ${support ? 'border-emerald-400/20 bg-emerald-400/[0.06]' : 'border-rose-400/20 bg-rose-400/[0.06]'}`}><div className="flex items-center justify-between"><span className={`text-xs font-black uppercase tracking-[0.14em] ${support ? 'text-emerald-300' : 'text-rose-300'}`}>Primary {side}</span>{support ? <ArrowDownRight className="size-4 text-emerald-300" /> : <ArrowUpRight className="size-4 text-rose-300" />}</div><p className="mt-3 font-mono text-3xl font-black">{money(level.strike)}</p><p className="mt-2 text-xs font-bold">{level.distancePoints.toFixed(1)} points · {level.distancePercent.toFixed(2)}%</p><p className="mt-1 text-[11px] text-muted-foreground">{label} {level.score}/100 — not a hold probability</p></article>;
 }
 
 

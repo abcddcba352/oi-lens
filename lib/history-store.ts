@@ -6,7 +6,7 @@ import type { HistoricalLevelObservation, LevelFeatures, LevelSide, MarketSnapsh
 import type { MarketDataProvider } from './providers/types';
 import { HORIZON_SESSIONS, declarePrimaryWalls, evaluateFromHistory, aggregateWallStats, analyzeFeatureThresholds, tradingSessionsUntilExpiry } from './wall-backtest';
 import type { WallStats, FeatureThresholds } from './wall-backtest';
-import { MIN_SESSIONS_FOR_BASIC_ANALYSIS } from './instrument-availability';
+import { MIN_SESSIONS_FOR_BASIC_ANALYSIS, MIN_SESSIONS_FOR_FULL_HISTORY } from './instrument-availability';
 
 const DAY = 86_400_000;
 
@@ -216,6 +216,7 @@ async function upsertSessions(symbol: string, sessions: PriceSession[]) {
     ON CONFLICT(instrument_id, session_date) DO UPDATE SET
       open = excluded.open, high = excluded.high, low = excluded.low,
       close = excluded.close, source = excluded.source
+    WHERE market_sessions.source != 'nse-bhavcopy'
   `).bind(`${symbol}:${session.date}`, symbol, session.date, session.open ?? session.close, session.high, session.low, session.close));
   for (let index = 0; index < statements.length; index += 50) {
     await env.DB.batch(statements.slice(index, index + 50));
@@ -234,7 +235,7 @@ export async function loadCachedPriceHistory(
   symbol: string,
   asOf: string,
 ): Promise<HistoryCacheResult | null> {
-  const end = asOf.slice(0, 10);
+  const end = dateOffset(asOf.slice(0, 10), -1);
   const start = dateOffset(end, -183);
   const rows = await getDb().select().from(marketSessions)
     .where(and(
@@ -264,15 +265,17 @@ export async function loadOrRefreshPriceHistory(
     return { history, source: 'cache', latestSession: history.at(-1)?.date ?? null };
   }
 
+  if (provider.id !== 'fyers') throw new Error('Live analysis requires real cached daily history; demo history cannot be stored.');
+
   await ensureInstrument(snapshot);
-  const end = snapshot.asOf.slice(0, 10);
+  const end = dateOffset(snapshot.asOf.slice(0, 10), -1);
   const start = dateOffset(end, -183);
   const db = getDb();
   const existing = await db.select().from(marketSessions)
     .where(and(eq(marketSessions.instrumentId, snapshot.symbol), gte(marketSessions.sessionDate, start), lte(marketSessions.sessionDate, end)))
     .orderBy(asc(marketSessions.sessionDate));
   const latest = existing.at(-1)?.sessionDate;
-  const fetchFrom = existing.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS ? start : dateOffset(latest!, -REFRESH_OVERLAP_DAYS);
+  const fetchFrom = existing.length < MIN_SESSIONS_FOR_FULL_HISTORY ? start : dateOffset(latest!, -REFRESH_OVERLAP_DAYS);
   const fetched = await provider.fetchPriceHistory(snapshot.symbol, fetchFrom, end);
   await upsertSessions(snapshot.symbol, fetched);
   const rows = await db.select().from(marketSessions)
@@ -282,7 +285,7 @@ export async function loadOrRefreshPriceHistory(
   if (history.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS) throw new Error(`FYERS returned too few daily sessions (${history.length}) for analysis. At least ${MIN_SESSIONS_FOR_BASIC_ANALYSIS} are needed.`);
   return {
     history,
-    source: existing.length < MIN_SESSIONS_FOR_BASIC_ANALYSIS ? 'backfilled' : fetched.length ? 'incremental' : 'cache',
+    source: existing.length < MIN_SESSIONS_FOR_FULL_HISTORY ? 'backfilled' : fetched.length ? 'incremental' : 'cache',
     latestSession: history.at(-1)?.date ?? null,
   };
 }
